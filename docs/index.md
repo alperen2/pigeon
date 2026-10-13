@@ -36,7 +36,7 @@ import { withBase } from "vitepress"
 </script>
 
 <div class="promo-video">
-  <video controls playsinline preload="metadata" :poster="withBase('/media/pigeon-promo-poster.jpg')" aria-label="Pigeon in 45 seconds">
+  <video controls playsinline preload="metadata" :poster="withBase('/media/pigeon-promo-poster.jpg')" aria-label="Pigeon in 40 seconds">
     <source :src="withBase('/media/pigeon-promo.mp4')" type="video/mp4">
   </video>
 </div>
