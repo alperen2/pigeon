@@ -1,11 +1,15 @@
 {
   // The public site at usepigeon.cc: the VitePress docs built with DOCS_BASE=/ (npm run site:build).
-  // Static assets only, no Worker code. Deploy with `npm run site:deploy` once the zone is active.
+  // Static assets; site.js only runs for /media/* to answer Range requests (Safari video).
+  // Deploy with `npm run site:deploy`.
   "$schema": "../cloud/node_modules/wrangler/config-schema.json",
   "name": "pigeon-site",
   "compatibility_date": "2026-09-01",
+  "main": "site.js",
   "assets": {
     "directory": "../docs/.vitepress/dist",
+    "binding": "ASSETS",
+    "run_worker_first": ["/media/*"],
     "html_handling": "drop-trailing-slash",
     "not_found_handling": "404-page"
   },
