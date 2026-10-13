@@ -18,7 +18,11 @@ Natural language date phrases are intentionally parsed only inside `due:`, `defe
 
 Pigeon intentionally stays in **capture + light triage** territory, not a full task manager.
 
-## Install (from source)
+## Install
+
+Get Pigeon from the [Mac App Store](https://apps.apple.com/app/pigeon-agentic-to-do/id6760581883).
+
+## Build from source
 
 ### Requirements
 

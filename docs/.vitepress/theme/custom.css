@@ -26,3 +26,17 @@
   border: 1px solid var(--vp-c-divider);
   border-radius: 14px;
 }
+
+.promo-video {
+  max-width: 1152px;
+  margin: 48px auto 0;
+}
+
+.promo-video video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(173, 25, 61, 0.18);
+  background: var(--vp-c-bg-soft);
+}
