@@ -10,6 +10,9 @@ hero:
     alt: Pigeon
   actions:
     - theme: brand
+      text: Download on the Mac App Store
+      link: https://apps.apple.com/app/pigeon-agentic-to-do/id6760581883
+    - theme: alt
       text: Get Started
       link: /getting-started
     - theme: alt
@@ -27,3 +30,13 @@ features:
   - title: Works with your AI agents
     details: Optionally connect Claude, ChatGPT or any MCP client through Pigeon Cloud. Agents take tasks meant for them and hand the next step back to you.
 ---
+
+<script setup>
+import { withBase } from "vitepress"
+</script>
+
+<div class="promo-video">
+  <video controls playsinline preload="metadata" :poster="withBase('/media/pigeon-promo-poster.jpg')" aria-label="Pigeon in 40 seconds">
+    <source :src="withBase('/media/pigeon-promo.mp4')" type="video/mp4">
+  </video>
+</div>
