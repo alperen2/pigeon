@@ -529,6 +529,45 @@ struct quickboxTests {
     }
 
     @Test
+    func appendWritesLinesAfterTheFirstAsTheTaskBody() throws {
+        let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempFolder) }
+        let writer = InboxWriter(storageResolver: TestStorageResolver(baseURL: tempFolder), makeTaskID: { "body0001" })
+        let date = Calendar(identifier: .gregorian).date(from: DateComponents(year: 2026, month: 2, day: 27, hour: 10, minute: 30))!
+
+        try writer.appendEntry("Send report #work\n- add Q3 #notatag\n\n  - nested", now: date)
+
+        let content = try String(contentsOf: tempFolder.appendingPathComponent("2026-02-27.md"))
+        #expect(content == "- [ ] 10:30 Send report #work id:body0001\n  - add Q3 #notatag\n    - nested\n")
+    }
+
+    @Test
+    func repositoryKeepsTheBodyWithItsTask() throws {
+        let (repository, fileURL, cleanup) = try makeRepositoryWithTodayFile(
+            "- [ ] 08:00 Report id:body0002\n  - add Q3\n- [ ] 09:00 Next id:next0001\n"
+        )
+        defer { cleanup() }
+
+        let item = try #require(try repository.loadToday().first)
+        #expect(item.body == "- add Q3")
+
+        _ = try repository.apply(.toggle(item.id))
+        #expect(try String(contentsOf: fileURL) == "- [x] 08:00 Report id:body0002\n  - add Q3\n- [ ] 09:00 Next id:next0001\n")
+
+        _ = try repository.apply(.edit(item.id, text: "Report v2\none\ntwo"))
+        #expect(try String(contentsOf: fileURL) == "- [x] 08:00 Report v2 id:body0002\n  one\n  two\n- [ ] 09:00 Next id:next0001\n")
+
+        _ = try repository.apply(.delete(item.id))
+        #expect(try String(contentsOf: fileURL) == "- [ ] 09:00 Next id:next0001\n")
+
+        _ = try repository.apply(.undoLastDelete)
+        #expect(try String(contentsOf: fileURL) == "- [x] 08:00 Report v2 id:body0002\n  one\n  two\n- [ ] 09:00 Next id:next0001\n")
+
+        _ = try repository.apply(.edit(item.id, text: "Report v3"))
+        #expect(try String(contentsOf: fileURL) == "- [x] 08:00 Report v3 id:body0002\n- [ ] 09:00 Next id:next0001\n")
+    }
+
+    @Test
     func repositorySetMetadataKeepsTaskIDThroughLegacyProjectMigration() throws {
         let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tempFolder, withIntermediateDirectories: true)

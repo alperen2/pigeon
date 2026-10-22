@@ -41,14 +41,15 @@ final class InboxWriter: InboxWriting {
     }
 
     func appendEntry(_ text: String, now: Date = Date()) throws {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
+        // The first line is the task; any further lines become its body.
+        let parts = TaskBody.split(text.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard !parts.title.isEmpty else {
             throw InboxWriterError.emptyEntry
         }
         
         // Parse the text to extract tokens
         let parser = InboxParser()
-        let parsedItems = parser.parse(lines: ["- [ ] 00:00 " + trimmed], sourceID: "temp")
+        let parsedItems = parser.parse(lines: ["- [ ] 00:00 " + parts.title], sourceID: "temp")
         guard var item = parsedItems.first else { throw InboxWriterError.emptyEntry }
         if item.taskID == nil {
             item.taskID = makeTaskID()
@@ -77,7 +78,7 @@ final class InboxWriter: InboxWriting {
                 try fileManager.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: nil)
 
                 let line = formattedLine(for: item, captureDate: now)
-                let entryText = normalizedEntry(for: fileURL, line: line)
+                let entryText = normalizedEntry(for: fileURL, line: ([line] + TaskBody.lines(parts.body)).joined(separator: "\n"))
                 let data = Data(entryText.utf8)
 
                 if !fileManager.fileExists(atPath: fileURL.path) {

@@ -28,6 +28,11 @@ struct CustomTextFieldWithKeyHandling: NSViewRepresentable {
         textField.textColor = NSColor.white.withAlphaComponent(0.95)
         textField.allowsEditingTextAttributes = true
         textField.importsGraphics = false
+        // Shift-Return adds lines (the task's body), so the field wraps and grows instead of scrolling.
+        textField.usesSingleLineMode = false
+        textField.cell?.wraps = true
+        textField.cell?.isScrollable = false
+        textField.lineBreakMode = .byWordWrapping
         textField.setAccessibilityIdentifier(accessibilityIdentifier)
 
         textField.onUpArrow = onUpArrow
@@ -54,6 +59,21 @@ struct CustomTextFieldWithKeyHandling: NSViewRepresentable {
         nsView.applySyntaxHighlighting()
     }
 
+    /// Grows with the text up to `maxLines`, so a multi-line capture stays readable.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: CustomNSTextField, context: Context) -> CGSize? {
+        guard let width = proposal.width, width > 0, let font = nsView.font else { return nil }
+        let maxLines: CGFloat = 8
+        let lineHeight = ceil(font.ascender - font.descender + font.leading)
+        // A trailing newline starts an empty line that the measurement would otherwise skip.
+        let measured = (text.hasSuffix("\n") ? text + " " : text) as NSString
+        let height = measured.boundingRect(
+            with: CGSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font]
+        ).height
+        return CGSize(width: width, height: min(max(lineHeight, ceil(height)), lineHeight * maxLines))
+    }
+
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
     }
@@ -73,6 +93,10 @@ struct CustomTextFieldWithKeyHandling: NSViewRepresentable {
 
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
+                    textView.insertNewlineIgnoringFieldEditor(nil)
+                    return true
+                }
                 if let onEnter = parent.onEnter, onEnter() {
                     return true // Swallowed by autocomplete
                 }
@@ -182,7 +206,9 @@ class CustomNSTextField: NSTextField {
 
     private func metadataHighlightRanges(in text: String) -> [MetadataHighlightRange] {
         let nsText = text as NSString
-        let fullRange = NSRange(location: 0, length: nsText.length)
+        // Tokens only count on the first line; the lines below are the task's body.
+        let firstLineEnd = nsText.range(of: "\n").location
+        let fullRange = NSRange(location: 0, length: firstLineEnd == NSNotFound ? nsText.length : firstLineEnd)
         let tokenMatches = Self.tokenRegex.matches(in: text, options: [], range: fullRange)
         if tokenMatches.isEmpty {
             return []

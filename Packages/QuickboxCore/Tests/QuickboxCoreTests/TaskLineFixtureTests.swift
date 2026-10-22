@@ -43,6 +43,7 @@ struct ExpectedItem: Decodable, Equatable, Sendable {
     let due: String?
     let metadata: [String: String]
     let taskID: String?
+    let body: String?
 }
 
 extension ExpectedItem {
@@ -57,7 +58,8 @@ extension ExpectedItem {
             project: item.projectName,
             due: item.dueDate,
             metadata: item.metadata,
-            taskID: item.taskID
+            taskID: item.taskID,
+            body: item.body
         )
     }
 }

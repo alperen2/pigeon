@@ -3,7 +3,7 @@ import Foundation
 /// A local change a device replays on the cloud copy. Mirrors `cloud/src/sync/ops.ts`; the JSON shape is
 /// pinned by `fixtures/sync-push-request.json`, which both sides test against.
 public enum SyncOp: Equatable, Sendable {
-    case add(opID: String, text: String, capturedAt: CapturedAt)
+    case add(opID: String, text: String, body: String? = nil, capturedAt: CapturedAt)
     case update(opID: String, taskID: String, patch: TaskPatch)
     case delete(opID: String, taskID: String)
     case insertLine(opID: String, path: String, line: String)
@@ -11,7 +11,7 @@ public enum SyncOp: Equatable, Sendable {
 
     public var opID: String {
         switch self {
-        case .add(let opID, _, _), .update(let opID, _, _), .delete(let opID, _),
+        case .add(let opID, _, _, _), .update(let opID, _, _), .delete(let opID, _),
              .insertLine(let opID, _, _), .importFile(let opID, _, _):
             return opID
         }
@@ -47,12 +47,15 @@ public struct CapturedAt: Codable, Equatable, Sendable {
 /// Fields to change on a task; a `.some(nil)` value clears the field on the server.
 public struct TaskPatch: Equatable, Sendable {
     public var text: String?
+    /// The task's description (`TaskBody`); `.some(nil)` removes it.
+    public var body: String??
     public var due: String??
     public var done: Bool?
     public var metadata: [String: String?]?
 
-    public init(text: String? = nil, due: String?? = nil, done: Bool? = nil, metadata: [String: String?]? = nil) {
+    public init(text: String? = nil, body: String?? = nil, due: String?? = nil, done: Bool? = nil, metadata: [String: String?]? = nil) {
         self.text = text
+        self.body = body
         self.due = due
         self.done = done
         self.metadata = metadata
@@ -60,11 +63,14 @@ public struct TaskPatch: Equatable, Sendable {
 }
 
 extension TaskPatch: Encodable {
-    private enum CodingKeys: String, CodingKey { case text, due, done, metadata }
+    private enum CodingKeys: String, CodingKey { case text, body, due, done, metadata }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(text, forKey: .text)
+        if let body {
+            try container.encode(body, forKey: .body)
+        }
         if let due {
             // Encode an explicit null to clear, omit the key to leave it unchanged.
             try container.encode(due, forKey: .due)
@@ -81,16 +87,17 @@ extension TaskPatch: Encodable {
 
 extension SyncOp: Encodable {
     private enum CodingKeys: String, CodingKey {
-        case opId, type, text, capturedAt, taskId, patch, path, line, content
+        case opId, type, text, body, capturedAt, taskId, patch, path, line, content
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(opID, forKey: .opId)
         switch self {
-        case .add(_, let text, let capturedAt):
+        case .add(_, let text, let body, let capturedAt):
             try container.encode("add", forKey: .type)
             try container.encode(text, forKey: .text)
+            try container.encodeIfPresent(body, forKey: .body)
             try container.encode(capturedAt, forKey: .capturedAt)
         case .update(_, let taskID, let patch):
             try container.encode("update", forKey: .type)
@@ -117,6 +124,7 @@ extension SyncOp: Decodable {
 
     private struct StoredPatch: Decodable {
         let text: String?
+        let body: String??
         let due: String??
         let done: Bool?
         let metadata: [String: String?]?
@@ -124,6 +132,9 @@ extension SyncOp: Decodable {
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: DynamicKey.self)
             text = try container.decodeIfPresent(String.self, forKey: DynamicKey("text"))
+            body = container.contains(DynamicKey("body"))
+                ? .some(try container.decodeIfPresent(String.self, forKey: DynamicKey("body")))
+                : nil
             due = container.contains(DynamicKey("due"))
                 ? .some(try container.decodeIfPresent(String.self, forKey: DynamicKey("due")))
                 : nil
@@ -138,11 +149,12 @@ extension SyncOp: Decodable {
         switch try container.decode(StoredKind.self, forKey: .type) {
         case .add:
             self = .add(opID: opID, text: try container.decode(String.self, forKey: .text),
+                        body: try container.decodeIfPresent(String.self, forKey: .body),
                         capturedAt: try container.decode(CapturedAt.self, forKey: .capturedAt))
         case .update:
             let stored = try container.decode(StoredPatch.self, forKey: .patch)
             self = .update(opID: opID, taskID: try container.decode(String.self, forKey: .taskId),
-                           patch: TaskPatch(text: stored.text, due: stored.due, done: stored.done, metadata: stored.metadata))
+                           patch: TaskPatch(text: stored.text, body: stored.body, due: stored.due, done: stored.done, metadata: stored.metadata))
         case .delete:
             self = .delete(opID: opID, taskID: try container.decode(String.self, forKey: .taskId))
         case .insertLine:

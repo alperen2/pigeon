@@ -3,8 +3,11 @@ import { resolveDueDate } from "../core/dueDate";
 import { HandoffKey } from "../core/handoff";
 import { generateTaskId, isValidTaskId } from "../core/taskId";
 import {
+  bodyLines,
   fieldsOf,
   formatTaskLine,
+  lineCountOf,
+  normalizeBody,
   parseTaskLine,
   parseTaskLines,
   toSingleLine,
@@ -35,6 +38,7 @@ const PROJECT_FOLDER_PATTERN = /^[A-Za-z0-9-][A-Za-z0-9_-]*$/;
 const TASK_FILE_NAME_PATTERN = /^[^/\\.\u0000-\u001f][^/\\\u0000-\u001f]{0,199}\.md$/;
 const MAX_NOTE_BYTES = 256 * 1024;
 const MAX_FILE_BYTES = 1024 * 1024;
+const MAX_BODY_BYTES = 32 * 1024;
 /** Tokens owned by the storage layer (routing, identity, authorship) or edited through dedicated fields. */
 const RESERVED_METADATA_KEYS = new Set(["id", "date", "due", HandoffKey.author]);
 /** Date keys whose values may be multi-word phrases such as "next friday". */
@@ -109,7 +113,8 @@ export class Inbox {
       taskId,
     });
 
-    this.files.write(path, joinLines([...splitLines(this.files.read(path)), line]));
+    const body = input.body === undefined ? null : validBody(input.body);
+    this.files.write(path, joinLines([...splitLines(this.files.read(path)), line, ...bodyLines(body)]));
     return toTask(path, this.require(taskId).line);
   }
 
@@ -118,7 +123,8 @@ export class Inbox {
     const fields = fieldsOf(located.line);
     applyPatch(fields, patch, this.clock.now().date);
 
-    located.lines[located.line.lineIndex] = formatTaskLine(fields);
+    const body = patch.body === undefined ? located.line.body : patch.body === null ? null : validBody(patch.body);
+    located.lines.splice(located.line.lineIndex, lineCountOf(located.line), formatTaskLine(fields), ...bodyLines(body));
     this.files.write(located.path, joinLines(located.lines));
     return toTask(located.path, this.require(taskId).line);
   }
@@ -129,18 +135,23 @@ export class Inbox {
 
   deleteTask(taskId: string): void {
     const located = this.require(taskId);
-    located.lines.splice(located.line.lineIndex, 1);
+    located.lines.splice(located.line.lineIndex, lineCountOf(located.line));
     this.files.write(located.path, joinLines(located.lines));
   }
 
-  /** Puts back a whole task line, e.g. to undo a delete. The line must carry an id that is not in use. */
-  insertLine(path: string, rawLine: string): Task {
+  /**
+   * Puts back a whole task, e.g. to undo a delete: its line, then any body lines. The line must
+   * carry an id that is not in use.
+   */
+  insertLine(path: string, rawLines: string): Task {
     const filePath = validTaskFilePath(path);
-    const parsed = parseTaskLine(toSingleLine(rawLine));
-    if (!parsed?.taskId) throw new InboxError("invalid_input", "Only task lines with an id: can be inserted.");
+    const [first = "", ...rest] = splitLines(rawLines.replace(/\r\n?/g, "\n"));
+    const parsed = parseTaskLines([first, ...rest], "insert")[0];
+    if (!parsed?.taskId || parsed.lineIndex !== 0) throw new InboxError("invalid_input", "Only task lines with an id: can be inserted.");
     if (this.find(parsed.taskId)) throw new InboxError("conflict", `A task with id "${parsed.taskId}" already exists.`);
+    const body = parsed.body === null ? null : validBody(parsed.body);
 
-    this.files.write(filePath, joinLines([...splitLines(this.files.read(filePath)), parsed.rawLine]));
+    this.files.write(filePath, joinLines([...splitLines(this.files.read(filePath)), parsed.rawLine, ...bodyLines(body)]));
     return toTask(filePath, this.require(parsed.taskId).line);
   }
 
@@ -357,5 +368,13 @@ function toTask(path: string, line: TaskLine): Task {
     priority: line.priority,
     due: line.due,
     metadata: line.metadata,
+    body: line.body,
   };
+}
+
+function validBody(body: string): string | null {
+  if (new TextEncoder().encode(body).byteLength > MAX_BODY_BYTES) {
+    throw new InboxError("invalid_input", `Task descriptions are limited to ${MAX_BODY_BYTES / 1024} KB.`);
+  }
+  return normalizeBody(body);
 }

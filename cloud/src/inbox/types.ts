@@ -15,6 +15,8 @@ export interface TaskQuery {
 export interface NewTask {
   /** A capture in quickbox syntax, e.g. `Publish post @Marketing due:tomorrow`. */
   text: string;
+  /** Multi-line description stored as indented lines under the task. */
+  body?: string;
   due?: string;
   assignee?: string;
   /** `id:` of the task this one follows up on. */
@@ -25,6 +27,8 @@ export interface NewTask {
 
 export interface TaskPatch {
   text?: string;
+  /** `null` removes the description. */
+  body?: string | null;
   /** `null` removes the due date. */
   due?: string | null;
   priority?: 1 | 2 | 3 | null;
@@ -48,6 +52,8 @@ export interface Task {
   due: string | null;
   /** Other tokens, including the handoff keys `for`, `by`, `from` and `ref`. */
   metadata: Record<string, string>;
+  /** Multi-line description, or `null`. */
+  body: string | null;
 }
 
 export interface Note {

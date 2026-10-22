@@ -202,7 +202,7 @@ final class AppState: ObservableObject {
             // Manually extracting tags and project from the draft to inject them immediately into IndexManager
             // without waiting for a full rebuild
             let parser = InboxParser()
-            let parsedItems = parser.parse(lines: ["- [ ] 00:00 " + draftText], sourceID: "temp")
+            let parsedItems = parser.parse(lines: ["- [ ] 00:00 " + TaskBody.split(draftText).title], sourceID: "temp")
             if let item = parsedItems.first {
                 IndexManager.shared.inject(tags: item.tags, project: item.projectName)
             }
@@ -227,7 +227,7 @@ final class AppState: ObservableObject {
         do {
             try inboxWriter.appendEntry(draftText, now: Date())
             let parser = InboxParser()
-            let parsedItems = parser.parse(lines: ["- [ ] 00:00 " + draftText], sourceID: "temp")
+            let parsedItems = parser.parse(lines: ["- [ ] 00:00 " + TaskBody.split(draftText).title], sourceID: "temp")
             if let item = parsedItems.first {
                 IndexManager.shared.inject(tags: item.tags, project: item.projectName)
             }
@@ -275,11 +275,11 @@ final class AppState: ObservableObject {
             return
         }
 
+        // Multi-line text keeps its lines: the first becomes the task, the rest its body.
         let cleaned = clipboardText
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "\r\n", with: " ")
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
 
         guard !cleaned.isEmpty, cleaned.count <= 500 else {
             return

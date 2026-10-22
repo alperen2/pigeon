@@ -6,6 +6,18 @@
 2. Type thought
 3. Press Enter
 
+### Notes under a task
+
+Press Shift-Return to start a new line. The first line is the task; the lines below are its description, for details or a short checklist. In the file they are indented under the task:
+
+```md
+- [ ] 14:02 Send the report #work id:a1b2c3d4
+  - add Q3 numbers
+  - CC the team
+```
+
+Only the first line is read for `@project`, `#tag`, `!priority` and `due:`. When you edit a task, Option-Return adds a line. A blank line ends the description, so blank lines inside it are not kept.
+
 ## Today list
 
 Inside spotlight panel, manage today's items quickly:

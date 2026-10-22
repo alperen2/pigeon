@@ -287,12 +287,29 @@ struct SyncingStorageTests {
         try writer.appendEntry("Buy milk #home", now: Date())
 
         let entry = try #require(base.entries.first)
-        guard case .add(_, let text, _) = try #require(outbox.peek(max: 1).first) else {
+        guard case .add(_, let text, _, _) = try #require(outbox.peek(max: 1).first) else {
             Issue.record("Expected an add op")
             return
         }
         #expect(text == entry)
         #expect(entry.range(of: #"^Buy milk #home id:[a-z0-9]{8}$"#, options: .regularExpression) != nil)
+    }
+
+    @Test
+    func multiLineCaptureKeepsTheIdOnTheFirstLineAndSendsTheBody() throws {
+        let base = RecordingWriter()
+        let outbox = SyncOutbox(fileURL: nil, isRecording: true)
+        let writer = SyncingInboxWriter(base: base, recorder: outbox)
+
+        try writer.appendEntry("Send report\n- add Q3", now: Date())
+
+        guard case .add(_, let text, let body, _) = try #require(outbox.peek(max: 1).first) else {
+            Issue.record("Expected an add op")
+            return
+        }
+        #expect(text.range(of: #"^Send report id:[a-z0-9]{8}$"#, options: .regularExpression) != nil)
+        #expect(body == "- add Q3")
+        #expect(base.entries == [text + "\n- add Q3"])
     }
 
     @Test
@@ -337,7 +354,7 @@ struct SyncingStorageTests {
             return
         }
         #expect(done == TaskPatch(done: true))
-        #expect(text == TaskPatch(text: "Final draft"))
+        #expect(text == TaskPatch(text: "Final draft", body: .some(nil)))
         #expect(time == TaskPatch(metadata: ["time": "1h"]))
         #expect(due == TaskPatch(due: .some(nil)))
         #expect(path == dayFile)

@@ -15,6 +15,7 @@ interface ExpectedItem {
   due: string | null;
   metadata: Record<string, string>;
   taskID: string | null;
+  body: string | null;
 }
 
 interface TaskLineFixtures {
@@ -41,6 +42,7 @@ describe("fixtures/task-lines.json", () => {
         due: item.due,
         metadata: item.metadata,
         taskID: item.taskId,
+        body: item.body,
       }),
     );
     expect(actual).toEqual(fixture.expected);

@@ -25,11 +25,21 @@ public struct InboxParser {
 
     public func parse(lines: [String], sourceID: String) -> [InboxItem] {
         var seenTaskIDs = Set<String>()
+        var items: [InboxItem] = []
+        // Body lines attach to the task right above them, until a blank or unindented line.
+        var collectingBody = false
 
-        return lines.enumerated().compactMap { index, line in
-            guard let match = line.firstMatch(of: Self.taskPattern) else {
-                return nil
+        for (index, line) in lines.enumerated() {
+            if collectingBody, TaskBody.isBodyLine(line) {
+                let bodyLine = TaskBody.unindent(line)
+                items[items.count - 1].body = items[items.count - 1].body.map { $0 + "\n" + bodyLine } ?? bodyLine
+                continue
             }
+            guard let match = line.firstMatch(of: Self.taskPattern) else {
+                collectingBody = false
+                continue
+            }
+            collectingBody = true
 
             let isCompleted = match.output.done != " "
             let time = String(match.output.time)
@@ -82,7 +92,7 @@ public struct InboxParser {
                 taskID = nil
             }
 
-            return InboxItem(
+            items.append(InboxItem(
                 id: Self.itemID(sourceID: sourceID, taskID: taskID, lineIndex: index, rawLine: line),
                 text: text,
                 tags: tags,
@@ -95,8 +105,9 @@ public struct InboxParser {
                 isCompleted: isCompleted,
                 lineIndex: index,
                 rawLine: line
-            )
+            ))
         }
+        return items
     }
 
     /// Lines with an `id:` token get a position-independent identity; legacy lines fall back

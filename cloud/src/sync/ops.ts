@@ -6,6 +6,8 @@ import { isValidTimeZone, parseISODate } from "../core/calendar";
  * the server replays them on its copy; every op carries a client-generated `opId` so a retry
  * after a lost response is applied only once.
  */
+/** Task descriptions are limited further by the inbox (32 KB); this only bounds the request. */
+const body = z.string().max(64 * 1024);
 const opId = z.string().min(8).max(64).regex(/^[A-Za-z0-9_-]+$/);
 const taskId = z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/);
 const localNow = z.object({
@@ -16,6 +18,7 @@ const localNow = z.object({
 const patch = z
   .object({
     text: z.string().max(2000).optional(),
+    body: body.nullable().optional(),
     due: z.string().max(64).nullable().optional(),
     priority: z.union([z.literal(1), z.literal(2), z.literal(3)]).nullable().optional(),
     assignee: z.string().max(64).nullable().optional(),
@@ -26,10 +29,10 @@ const patch = z
   .strict();
 
 export const syncOpSchema = z.discriminatedUnion("type", [
-  z.object({ opId, type: z.literal("add"), text: z.string().min(1).max(2000), capturedAt: localNow }).strict(),
+  z.object({ opId, type: z.literal("add"), text: z.string().min(1).max(2000), body: body.optional(), capturedAt: localNow }).strict(),
   z.object({ opId, type: z.literal("update"), taskId, patch }).strict(),
   z.object({ opId, type: z.literal("delete"), taskId }).strict(),
-  z.object({ opId, type: z.literal("insertLine"), path: z.string().max(256), line: z.string().max(4000) }).strict(),
+  z.object({ opId, type: z.literal("insertLine"), path: z.string().max(256), line: z.string().max(4000 + 64 * 1024) }).strict(),
   z.object({ opId, type: z.literal("importFile"), path: z.string().max(256), content: z.string().max(1024 * 1024) }).strict(),
 ]);
 
