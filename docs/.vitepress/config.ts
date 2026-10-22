@@ -1,5 +1,5 @@
-// usepigeon.cc serves the site at the root; GitHub Pages keeps /quickbox/ so existing links work.
-const base = process.env.DOCS_BASE ?? "/quickbox/";
+// usepigeon.cc serves the site at the root; the GitHub Pages copy lives under the repo name.
+const base = process.env.DOCS_BASE ?? "/pigeon/";
 
 export default {
   lang: "en-US",
@@ -17,7 +17,7 @@ export default {
       { text: "Support", link: "/support" },
       { text: "Privacy", link: "/privacy" },
       { text: "Contributing", link: "/contributing" },
-      { text: "GitHub", link: "https://github.com/alperen2/quickbox" }
+      { text: "GitHub", link: "https://github.com/alperen2/pigeon" }
     ],
     sidebar: [
       {
@@ -42,16 +42,16 @@ export default {
         ]
       }
     ],
-    socialLinks: [{ icon: "github", link: "https://github.com/alperen2/quickbox" }],
+    socialLinks: [{ icon: "github", link: "https://github.com/alperen2/pigeon" }],
     editLink: {
-      pattern: "https://github.com/alperen2/quickbox/edit/main/docs/:path",
+      pattern: "https://github.com/alperen2/pigeon/edit/main/docs/:path",
       text: "Edit this page on GitHub"
     },
     search: {
       provider: "local"
     },
     footer: {
-      message: "Released under the MIT License.",
+      message: 'Released under the MIT License. Logo and brand by <a href="https://aydincanataberk.com/">Aydıncan Ataberk</a>.',
       copyright: "Copyright © 2026 alperen2"
     }
   }

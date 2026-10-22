@@ -7,4 +7,4 @@ Quick contribution rules for Pigeon:
 - Include screenshots for UI changes
 - Avoid unrelated file changes
 
-Full guide: [CONTRIBUTING.md](https://github.com/alperen2/quickbox/blob/main/CONTRIBUTING.md).
+Full guide: [CONTRIBUTING.md](https://github.com/alperen2/pigeon/blob/main/CONTRIBUTING.md).
