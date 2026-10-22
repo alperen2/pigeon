@@ -20,6 +20,9 @@ Rules:
 const taskId = z.string().describe("The task's 8-character id, e.g. k3f9x2ab.");
 const notePath = z.string().describe("Path of a note, e.g. _notes/k3f9x2ab.md.");
 const assignee = z.string().describe('Who should act: "me" (the user), "agent", or a specific agent name.');
+const body = z
+  .string()
+  .describe("Multi-line description shown under the task, e.g. details or a short checklist. Longer output belongs in a note.");
 const dueDate = z.string().describe("YYYY-MM-DD or a phrase such as today, tomorrow, next friday, in 3 days.");
 
 /**
@@ -59,24 +62,26 @@ export function createQuickboxServer(inbox: InboxApi, actor: Actor): McpServer {
         `Add a task. \`text\` uses ${PRODUCT_NAME} syntax (e.g. "Publish post @Marketing #social !2"). Use for="me" to hand work back to the user, with from=<id of the task it follows> and ref=<note path>.`,
       inputSchema: z.object({
         text: z.string().describe("Task description, optionally with !priority, @Project, #tags."),
+        body: body.optional(),
         due: dueDate.optional(),
         for: assignee.optional(),
         from: taskId.optional().describe("Id of the task this one follows up on."),
         ref: notePath.optional().describe("A related note, e.g. the draft this task is about."),
       }),
     },
-    async ({ text, due, for: forWhom, from, ref }) =>
-      toToolResult(await inbox.addTask({ text, due, assignee: forWhom, origin: from, ref }, actor)),
+    async ({ text, body, due, for: forWhom, from, ref }) =>
+      toToolResult(await inbox.addTask({ text, body, due, assignee: forWhom, origin: from, ref }, actor)),
   );
 
   server.registerTool(
     "update_task",
     {
       title: "Update task",
-      description: "Change a task. Only the fields you pass change; pass null to clear due, priority, for or ref.",
+      description: "Change a task. Only the fields you pass change; pass null to clear body, due, priority, for or ref.",
       inputSchema: z.object({
         id: taskId,
         text: z.string().optional(),
+        body: body.nullable().optional(),
         due: dueDate.nullable().optional(),
         priority: z.union([z.literal(1), z.literal(2), z.literal(3)]).nullable().optional(),
         for: assignee.nullable().optional(),
@@ -84,8 +89,8 @@ export function createQuickboxServer(inbox: InboxApi, actor: Actor): McpServer {
         done: z.boolean().optional(),
       }),
     },
-    async ({ id, text, due, priority, for: forWhom, ref, done }) =>
-      toToolResult(await inbox.updateTask(id, { text, due, priority, assignee: forWhom, ref, done })),
+    async ({ id, text, body, due, priority, for: forWhom, ref, done }) =>
+      toToolResult(await inbox.updateTask(id, { text, body, due, priority, assignee: forWhom, ref, done })),
   );
 
   server.registerTool(

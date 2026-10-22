@@ -233,3 +233,41 @@ describe("agent handoff", () => {
     expect(inbox.listTasks({ assignee: "me" }).map((t) => t.id)).toEqual([followUp.id]);
   });
 });
+
+describe("task bodies", () => {
+  const FILE = "2026-09-28.md";
+  const BODY_FILE = "- [ ] 09:00 Send report id:rep00001\n  - add Q3\n    - nested\n- [ ] 10:00 Next id:nxt00001\n";
+
+  it("writes the body as indented lines under the task and lists it", () => {
+    const { inbox, store } = makeInbox();
+
+    const task = inbox.addTask({ text: "Send report", body: "- add Q3  \r\n\n  - nested" }, USER);
+
+    expect(store.read(FILE)).toBe("- [ ] 09:12 Send report id:task0001\n  - add Q3\n    - nested\n");
+    expect(task.body).toBe("- add Q3\n  - nested");
+    expect(inbox.listTasks()[0]?.body).toBe("- add Q3\n  - nested");
+  });
+
+  it("keeps the body on other changes and replaces or removes it on request", () => {
+    const { inbox, store } = makeInbox({ [FILE]: BODY_FILE });
+
+    inbox.updateTask("rep00001", { done: true });
+    expect(store.read(FILE)).toBe(BODY_FILE.replace("- [ ] 09:00", "- [x] 09:00"));
+
+    inbox.updateTask("rep00001", { body: "one line" });
+    expect(store.read(FILE)).toBe("- [x] 09:00 Send report id:rep00001\n  one line\n- [ ] 10:00 Next id:nxt00001\n");
+
+    inbox.updateTask("rep00001", { body: null });
+    expect(store.read(FILE)).toBe("- [x] 09:00 Send report id:rep00001\n- [ ] 10:00 Next id:nxt00001\n");
+  });
+
+  it("deletes the body with its task and puts both back on insert", () => {
+    const { inbox, store } = makeInbox({ [FILE]: BODY_FILE });
+
+    inbox.deleteTask("rep00001");
+    expect(store.read(FILE)).toBe("- [ ] 10:00 Next id:nxt00001\n");
+
+    inbox.insertLine(FILE, "- [ ] 09:00 Send report id:rep00001\n  - add Q3");
+    expect(store.read(FILE)).toBe("- [ ] 10:00 Next id:nxt00001\n- [ ] 09:00 Send report id:rep00001\n  - add Q3\n");
+  });
+});

@@ -50,6 +50,13 @@ struct CaptureView: View {
         static let textFont = NSFont.systemFont(ofSize: 13, weight: .medium)
         static let textLineHeight = ceil(textFont.ascender - textFont.descender + textFont.leading)
         static let maxTextLines: CGFloat = 3
+        static let bodyFont = NSFont.systemFont(ofSize: 12, weight: .regular)
+        static let bodyLineHeight = ceil(bodyFont.ascender - bodyFont.descender + bodyFont.leading)
+        static let maxBodyLines: CGFloat = 2
+        static let bodySpacing: CGFloat = 2
+        static let maxEditingLines: CGFloat = 6
+        /// The project, tag and metadata chips under the text, plus the stack spacing above them.
+        static let chipRowHeight: CGFloat = 24
     }
 
     private enum Style {
@@ -390,7 +397,8 @@ struct CaptureView: View {
     }
 
     private func analyzeDraftInsights() {
-        draftInsights = CaptureDraftAnalyzer().analyze(appState.draftText, now: Date())
+        // Only the first line holds tokens; the rest is the task's body.
+        draftInsights = CaptureDraftAnalyzer().analyze(TaskBody.split(appState.draftText).title, now: Date())
     }
 
     private func showSuccessToast(_ message: String) {
@@ -1350,14 +1358,32 @@ struct CaptureView: View {
             .paragraphStyle: paragraphStyle
         ]
 
-        let textRect = (item.text as NSString).boundingRect(
-            with: CGSize(width: availableTextWidth, height: .greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: attributes
-        )
+        func height(of text: String, font: NSFont, lineHeight: CGFloat, maxLines: CGFloat) -> CGFloat {
+            var fontAttributes = attributes
+            fontAttributes[.font] = font
+            let rect = (text as NSString).boundingRect(
+                with: CGSize(width: availableTextWidth, height: .greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                attributes: fontAttributes
+            )
+            return min(max(lineHeight, ceil(rect.height)), lineHeight * maxLines)
+        }
 
-        let maxTextHeight = Layout.textLineHeight * Layout.maxTextLines
-        let clampedTextHeight = min(max(Layout.textLineHeight, ceil(textRect.height)), maxTextHeight)
+        var clampedTextHeight: CGFloat
+        if editingItemID == item.id {
+            // The editor shows the title and body together and grows as lines are added.
+            let draft = editingDraftText.hasSuffix("\n") ? editingDraftText + " " : editingDraftText
+            clampedTextHeight = height(of: draft, font: Layout.textFont, lineHeight: Layout.textLineHeight, maxLines: Layout.maxEditingLines)
+        } else {
+            clampedTextHeight = height(of: item.text, font: Layout.textFont, lineHeight: Layout.textLineHeight, maxLines: Layout.maxTextLines)
+            if let body = item.body {
+                clampedTextHeight += Layout.bodySpacing
+                    + height(of: body, font: Layout.bodyFont, lineHeight: Layout.bodyLineHeight, maxLines: Layout.maxBodyLines)
+            }
+            if !item.tags.isEmpty || item.projectName != nil || !item.metadata.isEmpty {
+                clampedTextHeight += Layout.chipRowHeight
+            }
+        }
         let contentHeight = clampedTextHeight + Layout.rowVerticalPadding * 2
         return max(Layout.minimumRowHeight, contentHeight)
     }
@@ -1433,6 +1459,12 @@ struct CaptureView: View {
                     Text(item.time)
                         .font(.caption2)
                         .foregroundStyle(Color.white.opacity(0.58))
+                    if item.body != nil {
+                        Image(systemName: "text.alignleft")
+                            .font(.caption2)
+                            .foregroundStyle(Color.white.opacity(0.5))
+                            .help("Has a description")
+                    }
                     if let due = item.dueDate {
                         Text("due:\(due)")
                             .font(.caption2.weight(.medium))
@@ -1470,7 +1502,9 @@ struct CaptureView: View {
 
                 HStack(alignment: .top, spacing: 8) {
                     if isEditing {
-                        TextField("Edit task", text: $editingDraftText)
+                        // Option-Return adds a line; the lines after the first are the task's body.
+                        TextField("Edit task", text: $editingDraftText, axis: .vertical)
+                            .lineLimit(1...Int(Layout.maxEditingLines))
                             .textFieldStyle(.plain)
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(Style.label)
@@ -1494,6 +1528,15 @@ struct CaptureView: View {
                                     .foregroundStyle(item.isCompleted ? Style.tertiaryLabel : Style.label)
                                     .lineLimit(2)
                                     .fixedSize(horizontal: false, vertical: true)
+                            }
+
+                            if let body = item.body {
+                                Text(body)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Style.secondaryLabel)
+                                    .lineLimit(Int(Layout.maxBodyLines))
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .padding(.top, -2)
                             }
                                 
                             if !item.tags.isEmpty || item.projectName != nil || !item.metadata.isEmpty {
@@ -1656,7 +1699,7 @@ struct CaptureView: View {
 
     private func startEditing(_ item: InboxItem) {
         editingItemID = item.id
-        editingDraftText = item.text
+        editingDraftText = TaskBody.joined(title: item.text, body: item.body)
         focusRowEditorWithoutSelectingAll()
     }
 
@@ -1668,7 +1711,7 @@ struct CaptureView: View {
 
     private func saveEditing(_ item: InboxItem) {
         let cleaned = editingDraftText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard cleaned != item.text else {
+        guard cleaned != TaskBody.joined(title: item.text, body: item.body) else {
             cancelEditing()
             return
         }

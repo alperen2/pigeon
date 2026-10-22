@@ -39,7 +39,8 @@ final class InboxRepository: InboxRepositorying, @unchecked Sendable {
     private static let reservedMetadataKeys: Set<String> = [TaskIdentifier.metadataKey, "date"]
 
     private struct DeletedLine {
-        let line: String
+        /// The task line followed by its body lines.
+        let lines: [String]
         let lineIndex: Int
         let sourceID: String
     }
@@ -140,8 +141,9 @@ final class InboxRepository: InboxRepositorying, @unchecked Sendable {
                             throw InboxRepositoryError.itemNotFound
                         }
 
-                        lines.remove(at: item.lineIndex)
-                        lastDeleted = DeletedLine(line: item.rawLine, lineIndex: item.lineIndex, sourceID: sourceID)
+                        let block = item.lineIndex..<(item.lineIndex + item.lineCount)
+                        lastDeleted = DeletedLine(lines: Array(lines[block]), lineIndex: item.lineIndex, sourceID: sourceID)
+                        lines.removeSubrange(block)
 
                     case .edit(let id, text: let text):
                         let items = parser.parse(lines: lines, sourceID: sourceID)
@@ -149,12 +151,14 @@ final class InboxRepository: InboxRepositorying, @unchecked Sendable {
                             throw InboxRepositoryError.itemNotFound
                         }
 
-                        let normalizedText = normalizeToSingleLine(text)
-                        guard !normalizedText.isEmpty else {
+                        // The first line is the task text; the rest replaces its body.
+                        let parts = TaskBody.split(text.trimmingCharacters(in: .whitespacesAndNewlines))
+                        guard !parts.title.isEmpty else {
                             throw InboxRepositoryError.emptyEditedText
                         }
 
-                        lines[item.lineIndex] = try rebuiltLine(for: item, text: normalizedText)
+                        let rebuilt = try rebuiltLine(for: item, text: parts.title)
+                        lines.replaceSubrange(item.lineIndex..<(item.lineIndex + item.lineCount), with: [rebuilt] + TaskBody.lines(parts.body))
 
                     case .setMetadata(let id, key: let rawKey, value: let rawValue):
                         let items = parser.parse(lines: lines, sourceID: sourceID)
@@ -182,7 +186,7 @@ final class InboxRepository: InboxRepositorying, @unchecked Sendable {
                         }
 
                         let insertIndex = min(deleted.lineIndex, lines.count)
-                        lines.insert(deleted.line, at: insertIndex)
+                        lines.insert(contentsOf: deleted.lines, at: insertIndex)
                         lastDeleted = nil
                     }
 

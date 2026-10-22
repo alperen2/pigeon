@@ -24,6 +24,8 @@ export interface TaskLine {
   /** Other `key:value` tokens. Never contains `id`, `due` or the hidden `date` routing tag. */
   readonly metadata: Record<string, string>;
   readonly taskId: string | null;
+  /** The indented lines under the task line, unindented and joined with "\n"; see `bodyLines`. */
+  readonly body: string | null;
 }
 
 /** Fields that make up a line when writing it back. */
@@ -59,10 +61,19 @@ const DATE_PHRASE_TOKENS = new Set([
 
 export function parseTaskLines(lines: readonly string[], sourceId: string): TaskLine[] {
   const seenTaskIds = new Set<string>();
-  const items: TaskLine[] = [];
+  const items: { -readonly [K in keyof TaskLine]: TaskLine[K] }[] = [];
+  // Body lines attach to the task right above them, until a blank or unindented line.
+  let collectingBody = false;
 
   lines.forEach((line, index) => {
+    const current = items[items.length - 1];
+    if (collectingBody && current && isBodyLine(line)) {
+      const bodyLine = unindent(line);
+      current.body = current.body === null ? bodyLine : `${current.body}\n${bodyLine}`;
+      return;
+    }
     const match = TASK_PATTERN.exec(line);
+    collectingBody = match?.groups !== undefined;
     if (!match?.groups) return;
 
     const rawText = match.groups.text!;
@@ -105,10 +116,45 @@ export function parseTaskLines(lines: readonly string[], sourceId: string): Task
       due,
       metadata,
       taskId,
+      body: null,
     });
   });
 
   return items;
+}
+
+const BODY_INDENT = "  ";
+
+/** A body line starts with a space or a tab and is not blank. Mirrors `TaskBody.swift`. */
+function isBodyLine(line: string): boolean {
+  return /^[ \t]/.test(line) && line.trim() !== "";
+}
+
+/** Strips one level of indentation (a tab or up to two spaces), keeping deeper nesting. */
+function unindent(line: string): string {
+  return line.startsWith("\t") ? line.slice(1) : line.replace(/^ {1,2}/, "");
+}
+
+/** Lines the task occupies in its file: the task line plus its body lines. */
+export function lineCountOf(line: TaskLine): number {
+  return 1 + bodyLines(line.body).length;
+}
+
+/** The lines to write under a task line; empty when there is no body. */
+export function bodyLines(body: string | null): string[] {
+  return body === null ? [] : body.split("\n").map((line) => BODY_INDENT + line);
+}
+
+/**
+ * Line endings unified, trailing spaces and blank lines (which would end the body in the file)
+ * dropped. Returns null when nothing is left.
+ */
+export function normalizeBody(body: string): string | null {
+  const lines = body
+    .split(/\r\n|\n|\r/)
+    .map((line) => line.replace(/\s+$/, ""))
+    .filter((line) => line !== "");
+  return lines.length === 0 ? null : lines.join("\n");
 }
 
 /** Parses a single line on its own, e.g. to rebuild it. Unlike in a file, a duplicated id is kept. */

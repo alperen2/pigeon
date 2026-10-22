@@ -41,12 +41,12 @@ struct SyncModelsTests {
     private static let fixtureOps: [SyncOp] = [
         .importFile(opID: "0b5c8e4a-0000-4000-8000-000000000001", path: "2026-09-20.md", content: "- [ ] 08:00 Old local task\n"),
         .add(opID: "0b5c8e4a-0000-4000-8000-000000000002", text: "Buy milk #home id:mac00001",
-             capturedAt: CapturedAt(date: "2026-09-28", time: "09:30")),
+             body: "2 liters\nOat if they are out", capturedAt: CapturedAt(date: "2026-09-28", time: "09:30")),
         .update(opID: "0b5c8e4a-0000-4000-8000-000000000003", taskID: "mac00001",
                 patch: TaskPatch(due: .some(nil), done: true, metadata: ["remind": nil, "time": "1h"])),
-        .update(opID: "0b5c8e4a-0000-4000-8000-000000000004", taskID: "mac00001", patch: TaskPatch(text: "Buy oat milk")),
+        .update(opID: "0b5c8e4a-0000-4000-8000-000000000004", taskID: "mac00001", patch: TaskPatch(text: "Buy oat milk", body: .some(nil))),
         .delete(opID: "0b5c8e4a-0000-4000-8000-000000000005", taskID: "mac00001"),
         .insertLine(opID: "0b5c8e4a-0000-4000-8000-000000000006", path: "2026-09-28.md",
-                    line: "- [ ] 09:30 Buy oat milk #home id:mac00001"),
+                    line: "- [ ] 09:30 Buy oat milk #home id:mac00001\n  2 liters"),
     ]
 }

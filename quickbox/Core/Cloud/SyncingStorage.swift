@@ -21,10 +21,13 @@ nonisolated final class SyncingInboxWriter: InboxWriting, @unchecked Sendable {
         }
 
         // An explicit id token wins over any typed one, so local and cloud lines share it.
-        let entry = "\(text) \(TaskIdentifier.metadataKey):\(TaskIdentifier.generate())"
-        try base.appendEntry(entry, now: now)
+        // It goes on the first line: the rest of the text is the task's body.
+        let parts = TaskBody.split(text.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard !parts.title.isEmpty else { throw InboxWriterError.emptyEntry }
+        let title = "\(parts.title) \(TaskIdentifier.metadataKey):\(TaskIdentifier.generate())"
+        try base.appendEntry(TaskBody.joined(title: title, body: parts.body), now: now)
         onLocalWrite()
-        recorder.record(.add(opID: SyncOp.newOpID(), text: entry, capturedAt: CapturedAt(now)))
+        recorder.record(.add(opID: SyncOp.newOpID(), text: title, body: parts.body, capturedAt: CapturedAt(now)))
     }
 }
 
@@ -74,7 +77,8 @@ nonisolated final class SyncingInboxRepository: InboxRepositorying, @unchecked S
 
         case .edit(let itemID, let text):
             guard let taskID = Self.taskID(in: itemID) else { return nil }
-            return .update(opID: SyncOp.newOpID(), taskID: taskID, patch: TaskPatch(text: text))
+            let parts = TaskBody.split(text)
+            return .update(opID: SyncOp.newOpID(), taskID: taskID, patch: TaskPatch(text: parts.title, body: .some(parts.body)))
 
         case .setMetadata(let itemID, let key, let value):
             guard let taskID = Self.taskID(in: itemID) else { return nil }
@@ -90,7 +94,8 @@ nonisolated final class SyncingInboxRepository: InboxRepositorying, @unchecked S
             guard let deleted = lock.withLock({ lastDeleted }),
                   let restored = items.first(where: { $0.taskID == deleted.taskID }) else { return nil }
             lock.withLock { lastDeleted = nil }
-            return .insertLine(opID: SyncOp.newOpID(), path: deleted.path, line: restored.rawLine)
+            let block = [restored.rawLine] + TaskBody.lines(restored.body)
+            return .insertLine(opID: SyncOp.newOpID(), path: deleted.path, line: block.joined(separator: "\n"))
         }
     }
 

@@ -51,7 +51,7 @@ export class SyncService {
     switch (op.type) {
       case "add": {
         const capturedAt: LocalNow = { date: parseISODate(op.capturedAt.date)!, time: op.capturedAt.time };
-        this.inbox.addTask({ text: op.text }, { kind: "user" }, { capturedAt });
+        this.inbox.addTask({ text: op.text, body: op.body }, { kind: "user" }, { capturedAt });
         return;
       }
       case "update":
