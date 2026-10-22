@@ -63,7 +63,7 @@ npm run docs:dev
 ```
 
 - Published site: [usepigeon.cc](https://usepigeon.cc), deployed with `npm run site:deploy` (Cloudflare Workers static assets, `website/wrangler.jsonc`).
-- The GitHub Pages copy at [alperen2.github.io/quickbox](https://alperen2.github.io/quickbox/) stays up for links that already point there.
+- A GitHub Pages copy is published at [alperen2.github.io/pigeon](https://alperen2.github.io/pigeon/).
 
 ## Privacy
 
@@ -76,6 +76,10 @@ Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening a PR.
 ## Security
 
 Please read [`SECURITY.md`](SECURITY.md) for vulnerability reporting.
+
+## Credits
+
+Logo and brand by [Aydıncan Ataberk](https://aydincanataberk.com/).
 
 ## License
 

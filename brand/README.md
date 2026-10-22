@@ -2,6 +2,8 @@
 
 Pigeon is an agentic to-do tracker: you capture a thought in a second, and the AI agents you connect pick up tasks and hand work back. The mark is a **P** whose counter is a pigeon wearing a headset: a messenger that works for you.
 
+The logo and brand were designed by [Aydıncan Ataberk](https://aydincanataberk.com/).
+
 ## Logo files
 
 | File | Use |
