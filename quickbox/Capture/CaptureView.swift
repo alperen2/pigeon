@@ -73,6 +73,8 @@ struct CaptureView: View {
         static let detailParagraphSpacing: CGFloat = 5
         static let detailMaxBodyHeight: CGFloat = 340
         static let detailEditorHeight: CGFloat = 220
+        /// Past this many characters on one line, the capture hint suggests moving text to notes.
+        static let longTitleLength = 100
         /// The project, tag and metadata chips under the text, plus the stack spacing above them.
         static let chipRowHeight: CGFloat = 24
     }
@@ -83,6 +85,8 @@ struct CaptureView: View {
         static let tertiaryLabel = Color.white.opacity(0.36)
         static let fill = Color.white.opacity(0.10)
         static let fillMuted = Color.white.opacity(0.06)
+        /// Brand "Coral light", the link color on dark backgrounds (brand/README.md).
+        static let link = Color(red: 0xFF / 255, green: 0x7C / 255, blue: 0x8B / 255)
         static let divider = Color.white.opacity(0.08)
         static let panelFill = Color(red: 38 / 255, green: 38 / 255, blue: 42 / 255).opacity(0.72)
     }
@@ -418,6 +422,12 @@ struct CaptureView: View {
                 Text("↑↓ choose • Tab complete • Enter save • Esc close")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Style.tertiaryLabel)
+            } else if isDraftTitleLong {
+                // A long first line is usually a note: point to the body instead of splitting it silently.
+                Label("Long title. Shift-Return moves the rest to notes.", systemImage: "text.append")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Style.secondaryLabel)
+                    .accessibilityIdentifier("capture-long-title-hint")
             } else {
                 HStack(spacing: 6) {
                     hintToken("@", "project")
@@ -432,6 +442,10 @@ struct CaptureView: View {
                 }
             }
         }
+    }
+
+    private var isDraftTitleLong: Bool {
+        !appState.draftText.contains("\n") && appState.draftText.count > Layout.longTitleLength
     }
 
     private func hintToken(_ token: String, _ label: String) -> some View {
@@ -1868,7 +1882,7 @@ struct CaptureView: View {
             openDetail(item)
         } label: {
             HStack(alignment: .lastTextBaseline, spacing: 4) {
-                Text(Self.displayBody(body))
+                Text(Self.inlineMarkdown(Self.displayBody(body)))
                     .font(.system(size: 12))
                     .foregroundStyle(Style.secondaryLabel)
                     .lineSpacing(Layout.bodyLineSpacing)
@@ -2044,7 +2058,7 @@ struct CaptureView: View {
                     }
                 } else if let body = item.body {
                     ScrollView {
-                        detailBody(body)
+                        detailBody(body, for: item)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .frame(height: detailBodyViewportHeight(body))
@@ -2065,32 +2079,78 @@ struct CaptureView: View {
         }
     }
 
-    /// The note as readable text: list markers become bullets or checkboxes with a hanging indent.
-    private func detailBody(_ body: String) -> some View {
+    /// The note as readable text: list markers become bullets or checkboxes with a hanging indent,
+    /// checkboxes toggle on click, and links, **bold** and *italic* render as Markdown.
+    private func detailBody(_ body: String, for item: InboxItem) -> some View {
         VStack(alignment: .leading, spacing: Layout.detailParagraphSpacing) {
-            ForEach(Array(body.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
+            ForEach(Array(body.components(separatedBy: "\n").enumerated()), id: \.offset) { index, line in
                 let indent = line.prefix(while: { $0 == " " || $0 == "\t" })
                 let rest = String(line.dropFirst(indent.count))
                 let level = CGFloat(indent.reduce(0) { $0 + ($1 == "\t" ? 2 : 1) }) / 2
+                let marker = Self.listMarker(of: rest)
+                let isCheckedItem = marker?.symbol == "checkmark.square"
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    if let marker = Self.listMarker(of: rest) {
-                        Image(systemName: marker.symbol)
-                            .font(.system(size: marker.symbol == "circle.fill" ? 4 : 11, weight: .semibold))
-                            .foregroundStyle(Style.secondaryLabel)
-                            .frame(width: 12)
-                        Text(marker.text)
+                    if let marker {
+                        if marker.symbol == "circle.fill" {
+                            Image(systemName: marker.symbol)
+                                .font(.system(size: 4, weight: .semibold))
+                                .foregroundStyle(Style.secondaryLabel)
+                                .frame(width: 14)
+                        } else {
+                            Button {
+                                toggleChecklistItem(of: item, atLine: index)
+                            } label: {
+                                Image(systemName: marker.symbol)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(isCheckedItem ? Style.tertiaryLabel : Style.secondaryLabel)
+                                    .frame(width: 14)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help(isCheckedItem ? "Mark as not done" : "Mark as done")
+                        }
+                        Text(Self.inlineMarkdown(marker.text))
+                            .strikethrough(isCheckedItem)
+                            .foregroundStyle(isCheckedItem ? Style.tertiaryLabel : Color.white.opacity(0.86))
                     } else {
-                        Text(rest)
+                        Text(Self.inlineMarkdown(rest))
                     }
                 }
                 .font(.system(size: 13))
                 .lineSpacing(Layout.detailLineSpacing)
                 .foregroundStyle(Color.white.opacity(0.86))
+                .tint(Style.link)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.leading, level * 14)
             }
         }
         .textSelection(.enabled)
+    }
+
+    private func toggleChecklistItem(of item: InboxItem, atLine index: Int) {
+        guard let body = item.body, let toggled = TaskBody.togglingChecklistItem(in: body, atLine: index) else { return }
+        _ = appState.editInboxItem(id: item.id, text: TaskBody.joined(title: item.text, body: toggled))
+    }
+
+    /// Inline Markdown (links, **bold**, *italic*, `code`) with bare URLs made clickable too.
+    /// Display only: the stored note keeps its Markdown as typed.
+    static func inlineMarkdown(_ text: String) -> AttributedString {
+        var attributed = (try? AttributedString(
+            markdown: text,
+            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(text)
+
+        let plain = String(attributed.characters)
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return attributed }
+        for match in detector.matches(in: plain, range: NSRange(plain.startIndex..., in: plain)) {
+            guard let url = match.url, let range = Range(match.range, in: plain) else { continue }
+            let start = attributed.index(attributed.startIndex, offsetByCharacters: plain.distance(from: plain.startIndex, to: range.lowerBound))
+            let end = attributed.index(start, offsetByCharacters: plain.distance(from: range.lowerBound, to: range.upperBound))
+            if attributed[start..<end].link == nil {
+                attributed[start..<end].link = url
+            }
+        }
+        return attributed
     }
 
     /// `- [ ] x`, `- [x] x`, `- x` and `* x` as a symbol and the text after the marker.

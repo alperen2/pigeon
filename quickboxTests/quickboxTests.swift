@@ -547,6 +547,17 @@ struct quickboxTests {
     }
 
     @Test
+    func noteMarkdownLinksBareURLsAndKeepsEmphasis() throws {
+        let rendered = CaptureView.inlineMarkdown("**Brief** at https://usepigeon.cc and [docs](https://usepigeon.cc/usage)")
+
+        #expect(String(rendered.characters) == "Brief at https://usepigeon.cc and docs")
+        let links = rendered.runs.compactMap(\.link)
+        #expect(links == [URL(string: "https://usepigeon.cc")!, URL(string: "https://usepigeon.cc/usage")!])
+        let boldRun = try #require(rendered.runs.first)
+        #expect(boldRun.inlinePresentationIntent == .stronglyEmphasized)
+    }
+
+    @Test
     func detailViewReadsListMarkers() {
         #expect(CaptureView.listMarker(of: "- [ ] call")! == ("square", "call"))
         #expect(CaptureView.listMarker(of: "- [x] done")! == ("checkmark.square", "done"))

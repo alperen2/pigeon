@@ -52,6 +52,25 @@ public enum TaskBody {
         return (title, normalized(String(unified[unified.index(after: newline)...])))
     }
 
+    /// Flips the Markdown checklist item (`- [ ] ` / `- [x] `) on line `index` of a body, keeping its
+    /// indentation. Returns nil when that line is not a checklist item.
+    public static func togglingChecklistItem(in body: String, atLine index: Int) -> String? {
+        var lines = body.components(separatedBy: "\n")
+        guard lines.indices.contains(index) else { return nil }
+        let indent = lines[index].prefix(while: { $0 == " " || $0 == "\t" })
+        let rest = lines[index].dropFirst(indent.count)
+        let toggled: String
+        if rest.hasPrefix("- [ ] ") {
+            toggled = "- [x] " + rest.dropFirst(6)
+        } else if rest.hasPrefix("- [x] ") || rest.hasPrefix("- [X] ") {
+            toggled = "- [ ] " + rest.dropFirst(6)
+        } else {
+            return nil
+        }
+        lines[index] = indent + toggled
+        return lines.joined(separator: "\n")
+    }
+
     /// The inverse of `split`: the text a user edits, title first.
     public static func joined(title: String, body: String?) -> String {
         guard let body else { return title }
