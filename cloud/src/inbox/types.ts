@@ -32,6 +32,10 @@ export interface TaskPatch {
   /** `null` removes the due date. */
   due?: string | null;
   priority?: 1 | 2 | 3 | null;
+  /** `null` removes the project token. The task stays in its file, like an edit in the app. */
+  project?: string | null;
+  /** Replaces all tags. */
+  tags?: string[];
   assignee?: string | null;
   ref?: string | null;
   done?: boolean;

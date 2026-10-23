@@ -637,10 +637,17 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func sorted(_ items: [InboxItem]) -> [InboxItem] {
+    /// Newest first by capture time. Line numbers only break ties inside one file: they are not
+    /// comparable across the inbox and project files, and a task's body lines shift them.
+    static func sorted(_ items: [InboxItem]) -> [InboxItem] {
         items.sorted { lhs, rhs in
-            lhs.lineIndex > rhs.lineIndex
+            if lhs.time != rhs.time { return lhs.time > rhs.time }
+            return lhs.lineIndex > rhs.lineIndex
         }
+    }
+
+    private func sorted(_ items: [InboxItem]) -> [InboxItem] {
+        Self.sorted(items)
     }
 
     private func updateCalendarIndicator(for date: Date, using items: [InboxItem]) {

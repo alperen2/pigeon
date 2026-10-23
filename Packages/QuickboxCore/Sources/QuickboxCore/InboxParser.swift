@@ -26,15 +26,23 @@ public struct InboxParser {
     public func parse(lines: [String], sourceID: String) -> [InboxItem] {
         var seenTaskIDs = Set<String>()
         var items: [InboxItem] = []
-        // Body lines attach to the task right above them, until a blank or unindented line.
+        // Body lines attach to the task right above them, until an unindented line. Blank lines
+        // belong to the body only when more body follows, so paragraphs stay together.
         var collectingBody = false
+        var pendingBlankLines = 0
 
         for (index, line) in lines.enumerated() {
-            if collectingBody, TaskBody.isBodyLine(line) {
-                let bodyLine = TaskBody.unindent(line)
-                items[items.count - 1].body = items[items.count - 1].body.map { $0 + "\n" + bodyLine } ?? bodyLine
+            if collectingBody, TaskBody.isBlankLine(line) {
+                pendingBlankLines += 1
                 continue
             }
+            if collectingBody, TaskBody.isBodyLine(line) {
+                let bodyLine = String(repeating: "\n", count: pendingBlankLines) + TaskBody.unindent(line)
+                items[items.count - 1].body = items[items.count - 1].body.map { $0 + "\n" + bodyLine } ?? bodyLine
+                pendingBlankLines = 0
+                continue
+            }
+            pendingBlankLines = 0
             guard let match = line.firstMatch(of: Self.taskPattern) else {
                 collectingBody = false
                 continue

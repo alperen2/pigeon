@@ -59,26 +59,30 @@ nonisolated final class SyncingInboxRepository: InboxRepositorying, @unchecked S
     }
 
     func apply(_ mutation: InboxMutation, on date: Date) throws -> [InboxItem] {
+        // An edit is sent as the fields that changed, so the task as it was is needed too.
+        var before: InboxItem?
+        if recorder.isRecording, case .edit(let itemID, _) = mutation {
+            before = try? base.load(on: date).first { $0.id == itemID }
+        }
         let items = try base.apply(mutation, on: date)
         guard recorder.isRecording else { return items }
 
-        if let op = op(for: mutation, resultingItems: items) {
+        if let op = op(for: mutation, before: before, resultingItems: items) {
             onLocalWrite()
             recorder.record(op)
         }
         return items
     }
 
-    private func op(for mutation: InboxMutation, resultingItems items: [InboxItem]) -> SyncOp? {
+    private func op(for mutation: InboxMutation, before: InboxItem?, resultingItems items: [InboxItem]) -> SyncOp? {
         switch mutation {
         case .toggle(let itemID):
             guard let taskID = Self.taskID(in: itemID), let item = items.first(where: { $0.id == itemID }) else { return nil }
             return .update(opID: SyncOp.newOpID(), taskID: taskID, patch: TaskPatch(done: item.isCompleted))
 
-        case .edit(let itemID, let text):
-            guard let taskID = Self.taskID(in: itemID) else { return nil }
-            let parts = TaskBody.split(text)
-            return .update(opID: SyncOp.newOpID(), taskID: taskID, patch: TaskPatch(text: parts.title, body: .some(parts.body)))
+        case .edit(let itemID, _):
+            guard let taskID = Self.taskID(in: itemID), let edited = items.first(where: { $0.id == itemID }) else { return nil }
+            return .update(opID: SyncOp.newOpID(), taskID: taskID, patch: Self.editPatch(from: before, to: edited))
 
         case .setMetadata(let itemID, let key, let value):
             guard let taskID = Self.taskID(in: itemID) else { return nil }
@@ -97,6 +101,23 @@ nonisolated final class SyncingInboxRepository: InboxRepositorying, @unchecked S
             let block = [restored.rawLine] + TaskBody.lines(restored.body)
             return .insertLine(opID: SyncOp.newOpID(), path: deleted.path, line: block.joined(separator: "\n"))
         }
+    }
+
+    /// The edit as a patch: text and body always, other fields only where they changed. Provenance
+    /// keys never change through an edit, and the server would refuse `by:`.
+    static func editPatch(from before: InboxItem?, to after: InboxItem) -> TaskPatch {
+        var patch = TaskPatch(text: after.text, body: .some(after.body))
+        if before?.priority != after.priority || before == nil { patch.priority = .some(after.priority) }
+        if before?.projectName != after.projectName || before == nil { patch.project = .some(after.projectName) }
+        if before?.tags != after.tags || before == nil { patch.tags = after.tags }
+        if before?.dueDate != after.dueDate { patch.due = .some(after.dueDate) }
+
+        let keys = Set(after.metadata.keys).union(before.map { Set($0.metadata.keys) } ?? []).subtracting(InboxItem.provenanceKeys)
+        let changed = keys.filter { before?.metadata[$0] != after.metadata[$0] }
+        if !changed.isEmpty {
+            patch.metadata = Dictionary(uniqueKeysWithValues: changed.map { ($0, after.metadata[$0]) })
+        }
+        return patch
     }
 
     /// Item ids look like `<file>#id:<taskID>` once a line has a stable id.

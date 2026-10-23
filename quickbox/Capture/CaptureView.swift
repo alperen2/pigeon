@@ -491,13 +491,19 @@ struct CaptureView: View {
     // MARK: - Autocomplete Logic
     /// The part of `text` before the caret: completions work on the word being typed, wherever it is.
     private func textBeforeCaret(_ text: String) -> Substring {
-        guard let caret = autocompleteCaret else { return text[...] }
+        guard let caret = autocompleteCaret else { return text[...] }  // text set by the app: caret at the end
         let utf16 = text.utf16
         let end = utf16.index(utf16.startIndex, offsetBy: min(max(0, caret), utf16.count))
         return text[..<(end.samePosition(in: text) ?? text.endIndex)]
     }
 
     private func handleTextChange(_ newText: String) {
+        // Only typing opens suggestions: it reports a caret first. Text set by the app (opening an
+        // editor, a clipboard draft) has none, so a title ending in `#tag` does not pop the menu.
+        guard autocompleteCaret != nil else {
+            closeAutocomplete()
+            return
+        }
         let beforeCaret = textBeforeCaret(newText)
         // Suggestions complete tokens, which only exist on the first line; the rest is the body.
         if beforeCaret.last?.isWhitespace == true || beforeCaret.contains("\n") {
@@ -950,12 +956,13 @@ struct CaptureView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Calendar view")
         .help("Open calendar")
+        .accessibilityLabel(isCalendarViewActive ? "Close calendar" : "Open calendar")
     }
 
     private var spotlightHeader: some View {
         HStack {
             HStack(spacing: 2) {
-                todayHeaderButton(systemName: "chevron.left") {
+                todayHeaderButton(systemName: "chevron.left", label: "Previous day") {
                     appState.navigateInboxDayBackward()
                 }
 
@@ -964,7 +971,7 @@ struct CaptureView: View {
                     .foregroundStyle(Style.label)
                     .padding(.horizontal, 4)
 
-                todayHeaderButton(systemName: "chevron.right") {
+                todayHeaderButton(systemName: "chevron.right", label: "Next day") {
                     appState.navigateInboxDayForward()
                 }
                 .disabled(!appState.canNavigateForwardInboxDate)
@@ -1016,7 +1023,7 @@ struct CaptureView: View {
         }
     }
 
-    private func todayHeaderButton(systemName: String, action: @escaping () -> Void) -> some View {
+    private func todayHeaderButton(systemName: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 10, weight: .semibold))
@@ -1028,6 +1035,8 @@ struct CaptureView: View {
                 )
         }
         .buttonStyle(.plain)
+        .help(label)
+        .accessibilityLabel(label)
     }
 
     private var spotlightCalendar: some View {
@@ -1504,26 +1513,12 @@ struct CaptureView: View {
             if let body = item.body {
                 clampedTextHeight += Layout.bodySpacing + bodyTextHeight(body, maxLines: Layout.maxBodyLines)
             }
-            if !item.tags.isEmpty || item.projectName != nil || !item.metadata.isEmpty {
+            if item.priority != nil || !item.tags.isEmpty || item.projectName != nil || !item.metadata.isEmpty {
                 clampedTextHeight += Layout.chipRowHeight
             }
         }
         let contentHeight = clampedTextHeight + Layout.rowVerticalPadding * 2
         return max(Layout.minimumRowHeight, contentHeight)
-    }
-
-    private func navButton(systemName: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Style.secondaryLabel)
-                .frame(width: 22, height: 22)
-                .background(
-                    RoundedRectangle(cornerRadius: Layout.controlCornerRadius, style: .continuous)
-                        .fill(Style.fillMuted)
-                )
-        }
-        .buttonStyle(.plain)
     }
 
     private func calendarJumpButton(title: String, systemName: String, action: @escaping () -> Void) -> some View {
@@ -1588,6 +1583,7 @@ struct CaptureView: View {
                             .font(.caption2)
                             .foregroundStyle(Color.white.opacity(0.5))
                             .help("Has a description")
+                            .accessibilityLabel("Has a description")
                     }
                     if let due = item.dueDate {
                         Text("due:\(due)")
@@ -1623,6 +1619,9 @@ struct CaptureView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isEditing)
+                .help(item.isCompleted ? "Mark as open" : "Mark as done")
+                .accessibilityLabel(item.isCompleted ? "Mark as open" : "Mark as done")
+                .accessibilityValue(item.priority.map { "\(Self.priorityName($0)) priority" } ?? "")
 
                 HStack(alignment: .top, spacing: 8) {
                     if isEditing {
@@ -1635,6 +1634,7 @@ struct CaptureView: View {
                                         .font(.system(size: 11))
                                         .foregroundStyle(Color.blue.opacity(0.8))
                                         .help("Deferred arrival")
+                                        .accessibilityLabel("Deferred")
                                 }
                                 
                                 Text(item.text)
@@ -1650,8 +1650,22 @@ struct CaptureView: View {
                                     .padding(.top, -2)
                             }
                                 
-                            if !item.tags.isEmpty || item.projectName != nil || !item.metadata.isEmpty {
+                            if item.priority != nil || !item.tags.isEmpty || item.projectName != nil || !item.metadata.isEmpty {
                                 HStack(spacing: 6) {
+                                    // Spelled out, not only the circle's color, so priority does not rely on color alone.
+                                    if let priority = item.priority {
+                                        HStack(spacing: 3) {
+                                            Image(systemName: "flag.fill")
+                                            Text(Self.priorityName(priority))
+                                        }
+                                        .font(.system(size: 11, weight: .bold))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(priorityColor(for: priority).opacity(0.2))
+                                        .cornerRadius(5)
+                                        .foregroundStyle(priorityColor(for: priority))
+                                    }
+
                                     if let project = item.projectName {
                                         HStack(spacing: 4) {
                                             Image(systemName: "folder.fill")
@@ -1806,6 +1820,7 @@ struct CaptureView: View {
         }
         .buttonStyle(.plain)
         .help(tooltip)
+        .accessibilityLabel(tooltip)
     }
 
     /// Inline edit in the list: the title only, with the capture field's suggestions and colors.
@@ -1899,6 +1914,10 @@ struct CaptureView: View {
         }
         .buttonStyle(.plain)
         .help("Open note")
+        // The label is short; the note itself is the value, so VoiceOver reads it only on request.
+        .accessibilityLabel("Note")
+        .accessibilityValue(body)
+        .accessibilityHint("Opens the whole note")
     }
 
     /// Markdown list markers (`- `, `* `) read better as bullets; the stored text is unchanged.
@@ -1941,7 +1960,7 @@ struct CaptureView: View {
         if editingNotes {
             if editingItemID != item.id {
                 editingItemID = item.id
-                editingTitleText = item.text
+                editingTitleText = item.editableText
                 editingNotesText = item.body ?? ""
             }
             DispatchQueue.main.async { focusedField = .rowEditorNotes }
@@ -2022,9 +2041,12 @@ struct CaptureView: View {
                         .textSelection(.enabled)
                 }
 
-                Text(detailMetaLine(for: item))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Style.secondaryLabel)
+                // While editing, the title field shows these tokens itself.
+                if !isEditing {
+                    Text(detailMetaLine(for: item))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Style.secondaryLabel)
+                }
 
                 Rectangle().fill(Style.divider).frame(height: 0.5)
 
@@ -2108,6 +2130,7 @@ struct CaptureView: View {
                             }
                             .buttonStyle(.plain)
                             .help(isCheckedItem ? "Mark as not done" : "Mark as done")
+                            .accessibilityLabel(isCheckedItem ? "Mark as not done" : "Mark as done")
                         }
                         Text(Self.inlineMarkdown(marker.text))
                             .strikethrough(isCheckedItem)
@@ -2129,7 +2152,7 @@ struct CaptureView: View {
 
     private func toggleChecklistItem(of item: InboxItem, atLine index: Int) {
         guard let body = item.body, let toggled = TaskBody.togglingChecklistItem(in: body, atLine: index) else { return }
-        _ = appState.editInboxItem(id: item.id, text: TaskBody.joined(title: item.text, body: toggled))
+        _ = appState.editInboxItem(id: item.id, text: TaskBody.joined(title: item.editableText, body: toggled))
     }
 
     /// Inline Markdown (links, **bold**, *italic*, `code`) with bare URLs made clickable too.
@@ -2166,6 +2189,7 @@ struct CaptureView: View {
 
     private func detailMetaLine(for item: InboxItem) -> String {
         var parts = [item.time]
+        if let priority = item.priority { parts.append("!\(priority) \(Self.priorityName(priority))") }
         if let project = item.projectName { parts.append("@\(project)") }
         parts += item.tags.map { "#\($0)" }
         if let due = item.dueDate { parts.append("due:\(due)") }
@@ -2213,7 +2237,7 @@ struct CaptureView: View {
     private func startEditing(_ item: InboxItem) {
         closeAutocomplete()
         editingItemID = item.id
-        editingTitleText = item.text
+        editingTitleText = item.editableText
         editingNotesText = item.body ?? ""
         focusRowEditorWithoutSelectingAll()
     }
@@ -2231,7 +2255,7 @@ struct CaptureView: View {
             title: editingTitleText.trimmingCharacters(in: .whitespacesAndNewlines),
             body: TaskBody.normalized(editingNotesText)
         )
-        guard cleaned != TaskBody.joined(title: item.text, body: item.body) else {
+        guard cleaned != TaskBody.joined(title: item.editableText, body: item.body) else {
             cancelEditing()
             return
         }
@@ -2423,6 +2447,15 @@ struct CaptureView: View {
 
         default:
             return false
+        }
+    }
+
+    /// `!1`–`!3` as words, matching the syntax guide.
+    static func priorityName(_ priority: Int) -> String {
+        switch priority {
+        case 1: return "High"
+        case 2: return "Medium"
+        default: return "Low"
         }
     }
 

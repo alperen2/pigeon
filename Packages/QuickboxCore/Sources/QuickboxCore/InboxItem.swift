@@ -46,6 +46,24 @@ public struct InboxItem: Identifiable, Equatable, Sendable {
         self.rawLine = rawLine
     }
 
+    /// Handoff keys that record where a task came from. They are kept out of `editableText`,
+    /// and an edit carries them over unchanged.
+    public static let provenanceKeys: Set<String> = [TaskHandoffKey.author, TaskHandoffKey.origin, TaskHandoffKey.reference]
+
+    /// The task line as the user edits it: text, then priority, project, tags, due and other
+    /// tokens in the order the app writes them. Identity, routing and provenance stay out.
+    public var editableText: String {
+        var parts = text.isEmpty ? [] : [text]
+        if let priority { parts.append("!\(priority)") }
+        if let projectName { parts.append("@\(projectName)") }
+        parts += tags.map { "#\($0)" }
+        if let dueDate { parts.append("due:\(dueDate)") }
+        for key in metadata.keys.sorted() where !Self.provenanceKeys.contains(key) {
+            parts.append("\(key):\(metadata[key]!)")
+        }
+        return parts.joined(separator: " ")
+    }
+
     /// Lines the task occupies in its file: the task line plus its body lines.
     public var lineCount: Int {
         1 + TaskBody.lines(body).count

@@ -49,13 +49,29 @@ public struct TaskPatch: Equatable, Sendable {
     public var text: String?
     /// The task's description (`TaskBody`); `.some(nil)` removes it.
     public var body: String??
+    public var priority: Int??
+    public var project: String??
+    /// Replaces all tags.
+    public var tags: [String]?
     public var due: String??
     public var done: Bool?
     public var metadata: [String: String?]?
 
-    public init(text: String? = nil, body: String?? = nil, due: String?? = nil, done: Bool? = nil, metadata: [String: String?]? = nil) {
+    public init(
+        text: String? = nil,
+        body: String?? = nil,
+        priority: Int?? = nil,
+        project: String?? = nil,
+        tags: [String]? = nil,
+        due: String?? = nil,
+        done: Bool? = nil,
+        metadata: [String: String?]? = nil
+    ) {
         self.text = text
         self.body = body
+        self.priority = priority
+        self.project = project
+        self.tags = tags
         self.due = due
         self.done = done
         self.metadata = metadata
@@ -63,7 +79,7 @@ public struct TaskPatch: Equatable, Sendable {
 }
 
 extension TaskPatch: Encodable {
-    private enum CodingKeys: String, CodingKey { case text, body, due, done, metadata }
+    private enum CodingKeys: String, CodingKey { case text, body, priority, project, tags, due, done, metadata }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -71,6 +87,13 @@ extension TaskPatch: Encodable {
         if let body {
             try container.encode(body, forKey: .body)
         }
+        if let priority {
+            try container.encode(priority, forKey: .priority)
+        }
+        if let project {
+            try container.encode(project, forKey: .project)
+        }
+        try container.encodeIfPresent(tags, forKey: .tags)
         if let due {
             // Encode an explicit null to clear, omit the key to leave it unchanged.
             try container.encode(due, forKey: .due)
@@ -125,6 +148,9 @@ extension SyncOp: Decodable {
     private struct StoredPatch: Decodable {
         let text: String?
         let body: String??
+        let priority: Int??
+        let project: String??
+        let tags: [String]?
         let due: String??
         let done: Bool?
         let metadata: [String: String?]?
@@ -135,6 +161,13 @@ extension SyncOp: Decodable {
             body = container.contains(DynamicKey("body"))
                 ? .some(try container.decodeIfPresent(String.self, forKey: DynamicKey("body")))
                 : nil
+            priority = container.contains(DynamicKey("priority"))
+                ? .some(try container.decodeIfPresent(Int.self, forKey: DynamicKey("priority")))
+                : nil
+            project = container.contains(DynamicKey("project"))
+                ? .some(try container.decodeIfPresent(String.self, forKey: DynamicKey("project")))
+                : nil
+            tags = try container.decodeIfPresent([String].self, forKey: DynamicKey("tags"))
             due = container.contains(DynamicKey("due"))
                 ? .some(try container.decodeIfPresent(String.self, forKey: DynamicKey("due")))
                 : nil
@@ -154,7 +187,8 @@ extension SyncOp: Decodable {
         case .update:
             let stored = try container.decode(StoredPatch.self, forKey: .patch)
             self = .update(opID: opID, taskID: try container.decode(String.self, forKey: .taskId),
-                           patch: TaskPatch(text: stored.text, body: stored.body, due: stored.due, done: stored.done, metadata: stored.metadata))
+                           patch: TaskPatch(text: stored.text, body: stored.body, priority: stored.priority, project: stored.project,
+                                            tags: stored.tags, due: stored.due, done: stored.done, metadata: stored.metadata))
         case .delete:
             self = .delete(opID: opID, taskID: try container.decode(String.self, forKey: .taskId))
         case .insertLine:

@@ -6,8 +6,9 @@ import Foundation
 ///       - add Q3 numbers
 ///       - CC the team
 ///
-/// A body line starts with a space or a tab and is not blank; a blank or unindented line ends
-/// the body. Mirrors `cloud/src/core/taskLine.ts`.
+/// A body line starts with a space or a tab and is not blank. Blank lines inside the body separate
+/// paragraphs and are written without indentation; an unindented line, or blank lines with no body
+/// after them, end it. Mirrors `cloud/src/core/taskLine.ts`.
 public enum TaskBody {
     public static let indent = "  "
 
@@ -15,6 +16,10 @@ public enum TaskBody {
     public static func isBodyLine(_ line: String) -> Bool {
         guard let first = line.first, first == " " || first == "\t" else { return false }
         return !line.allSatisfy(\.isWhitespace)
+    }
+
+    public static func isBlankLine(_ line: String) -> Bool {
+        line.allSatisfy(\.isWhitespace)
     }
 
     /// Strips one level of indentation (a tab or up to two spaces), keeping deeper nesting.
@@ -26,11 +31,12 @@ public enum TaskBody {
     /// The lines to write under a task line; empty when there is no body.
     public static func lines(_ body: String?) -> [String] {
         guard let body else { return [] }
-        return body.components(separatedBy: "\n").map { indent + $0 }
+        // Blank lines stay empty: editors strip trailing spaces, and the parser keeps them anyway.
+        return body.components(separatedBy: "\n").map { $0.isEmpty ? "" : indent + $0 }
     }
 
-    /// Normalizes a body: line endings unified, trailing spaces and blank lines (which would end
-    /// the body in the file) dropped. Returns nil when nothing is left.
+    /// Normalizes a body: line endings unified, trailing spaces and leading or trailing blank lines
+    /// dropped. Blank lines between paragraphs stay. Returns nil when nothing is left.
     public static func normalized(_ body: String?) -> String? {
         guard let body else { return nil }
         let lines = body
@@ -38,8 +44,9 @@ public enum TaskBody {
             .replacingOccurrences(of: "\r", with: "\n")
             .components(separatedBy: "\n")
             .map { String($0.reversed().drop(while: \.isWhitespace).reversed()) }
-            .filter { !$0.isEmpty }
-        return lines.isEmpty ? nil : lines.joined(separator: "\n")
+        guard let first = lines.firstIndex(where: { !$0.isEmpty }),
+              let last = lines.lastIndex(where: { !$0.isEmpty }) else { return nil }
+        return lines[first...last].joined(separator: "\n")
     }
 
     /// Splits typed text into the task line's text (first line) and its body (the rest).

@@ -281,6 +281,8 @@ function applyPatch(fields: TaskLineFields, patch: TaskPatch, today: LocalDate):
     }
   }
   if (patch.priority !== undefined) fields.priority = patch.priority;
+  if (patch.project !== undefined) fields.project = patch.project === null ? null : tokenValue(patch.project, "project");
+  if (patch.tags !== undefined) fields.tags = [...new Set(patch.tags.map((tag) => tokenValue(tag, "tag")))];
   if (patch.assignee !== undefined) {
     setToken(fields, HandoffKey.assignee, patch.assignee === null ? null : tokenValue(patch.assignee, "for"));
   }

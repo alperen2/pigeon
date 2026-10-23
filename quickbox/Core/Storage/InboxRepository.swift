@@ -157,7 +157,7 @@ final class InboxRepository: InboxRepositorying, @unchecked Sendable {
                             throw InboxRepositoryError.emptyEditedText
                         }
 
-                        let rebuilt = try rebuiltLine(for: item, text: parts.title)
+                        let rebuilt = try editedLine(for: item, title: parts.title)
                         lines.replaceSubrange(item.lineIndex..<(item.lineIndex + item.lineCount), with: [rebuilt] + TaskBody.lines(parts.body))
 
                     case .setMetadata(let id, key: let rawKey, value: let rawValue):
@@ -271,6 +271,27 @@ final class InboxRepository: InboxRepositorying, @unchecked Sendable {
             _ = try fileManager.replaceItemAt(fileURL, withItemAt: tempURL)
         } else {
             try fileManager.moveItem(at: tempURL, to: fileURL)
+        }
+    }
+
+    /// Rebuilds a task line from edited text, whose tokens replace the line's. Identity, routing and
+    /// provenance (`by:`, `from:`, `ref:`) are not part of the edited text and carry over.
+    private func editedLine(for item: InboxItem, title: String) throws -> String {
+        guard let edited = parser.parse(lines: ["- [ ] 00:00 " + title], sourceID: "temp").first, !edited.text.isEmpty else {
+            throw InboxRepositoryError.emptyEditedText
+        }
+        let preferences = currentPreferences()
+        return try rebuiltLine(for: item, text: edited.text) { parsed in
+            parsed.priority = edited.priority
+            parsed.projectName = edited.projectName
+            parsed.tags = edited.tags
+            if edited.dueDate != parsed.dueDate {
+                parsed.dueDate = edited.dueDate.map { InboxWriter.formattedDue($0, from: Date(), preferences: preferences) }
+            }
+            let provenance = parsed.metadata.filter { InboxItem.provenanceKeys.contains($0.key) }
+            parsed.metadata = edited.metadata
+                .filter { !InboxItem.provenanceKeys.contains($0.key) }
+                .merging(provenance) { _, kept in kept }
         }
     }
 
