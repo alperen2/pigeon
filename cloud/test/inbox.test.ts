@@ -243,9 +243,9 @@ describe("task bodies", () => {
 
     const task = inbox.addTask({ text: "Send report", body: "- add Q3  \r\n\n  - nested" }, USER);
 
-    expect(store.read(FILE)).toBe("- [ ] 09:12 Send report id:task0001\n  - add Q3\n    - nested\n");
-    expect(task.body).toBe("- add Q3\n  - nested");
-    expect(inbox.listTasks()[0]?.body).toBe("- add Q3\n  - nested");
+    expect(store.read(FILE)).toBe("- [ ] 09:12 Send report id:task0001\n  - add Q3\n\n    - nested\n");
+    expect(task.body).toBe("- add Q3\n\n  - nested");
+    expect(inbox.listTasks()[0]?.body).toBe("- add Q3\n\n  - nested");
   });
 
   it("keeps the body on other changes and replaces or removes it on request", () => {
@@ -259,6 +259,16 @@ describe("task bodies", () => {
 
     inbox.updateTask("rep00001", { body: null });
     expect(store.read(FILE)).toBe("- [x] 09:00 Send report id:rep00001\n- [ ] 10:00 Next id:nxt00001\n");
+  });
+
+  it("replaces tags and the project token from a patch", () => {
+    const { inbox, store } = makeInbox({ [FILE]: "- [ ] 09:00 Plan !1 @Launch #work id:pln00001\n" });
+
+    const task = inbox.updateTask("pln00001", { tags: ["home", "home", "errand"], project: null, priority: null });
+
+    expect(store.read(FILE)).toBe("- [ ] 09:00 Plan #home #errand id:pln00001\n");
+    expect(task).toMatchObject({ tags: ["home", "errand"], project: null, priority: null });
+    expect(() => inbox.updateTask("pln00001", { tags: ["two words"] })).toThrow(InboxError);
   });
 
   it("deletes the body with its task and puts both back on insert", () => {

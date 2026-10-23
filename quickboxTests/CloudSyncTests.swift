@@ -296,6 +296,16 @@ struct SyncingStorageTests {
     }
 
     @Test
+    func editPatchSendsOnlyChangedFields() {
+        let parser = InboxParser()
+        let before = parser.parse(lines: ["- [ ] 08:00 Draft !1 #social time:30m by:claude id:edit0001"], sourceID: "a.md")[0]
+        let after = parser.parse(lines: ["- [ ] 08:00 Draft v2 !1 #social #work remind:1h by:claude id:edit0001"], sourceID: "a.md")[0]
+
+        #expect(SyncingInboxRepository.editPatch(from: before, to: after)
+            == TaskPatch(text: "Draft v2", body: .some(nil), tags: ["social", "work"], metadata: ["time": String?.none, "remind": "1h"]))
+    }
+
+    @Test
     func multiLineCaptureKeepsTheIdOnTheFirstLineAndSendsTheBody() throws {
         let base = RecordingWriter()
         let outbox = SyncOutbox(fileURL: nil, isRecording: true)
@@ -334,7 +344,7 @@ struct SyncingStorageTests {
         let legacy = try #require(try repository.loadToday().first { $0.taskID == nil })
 
         _ = try repository.apply(.toggle(itemID))
-        _ = try repository.apply(.edit(itemID, text: "Final draft"))
+        _ = try repository.apply(.edit(itemID, text: "Final draft time:30m"))
         _ = try repository.apply(.setMetadata(itemID, key: "time", value: "1h"))
         _ = try repository.apply(.setMetadata(itemID, key: "due", value: nil))
         _ = try repository.apply(.toggle(legacy.id)) // no id: local only

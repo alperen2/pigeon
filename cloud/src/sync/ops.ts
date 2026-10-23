@@ -21,6 +21,8 @@ const patch = z
     body: body.nullable().optional(),
     due: z.string().max(64).nullable().optional(),
     priority: z.union([z.literal(1), z.literal(2), z.literal(3)]).nullable().optional(),
+    project: z.string().max(64).nullable().optional(),
+    tags: z.array(z.string().max(64)).max(32).optional(),
     assignee: z.string().max(64).nullable().optional(),
     ref: z.string().max(256).nullable().optional(),
     done: z.boolean().optional(),

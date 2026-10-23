@@ -44,7 +44,9 @@ struct SyncModelsTests {
              body: "2 liters\nOat if they are out", capturedAt: CapturedAt(date: "2026-09-28", time: "09:30")),
         .update(opID: "0b5c8e4a-0000-4000-8000-000000000003", taskID: "mac00001",
                 patch: TaskPatch(due: .some(nil), done: true, metadata: ["remind": nil, "time": "1h"])),
-        .update(opID: "0b5c8e4a-0000-4000-8000-000000000004", taskID: "mac00001", patch: TaskPatch(text: "Buy oat milk", body: .some(nil))),
+        .update(opID: "0b5c8e4a-0000-4000-8000-000000000004", taskID: "mac00001", patch: TaskPatch(
+                    text: "Buy oat milk", body: .some(nil), priority: .some(2), project: .some(nil), tags: ["home", "errand"]
+                )),
         .delete(opID: "0b5c8e4a-0000-4000-8000-000000000005", taskID: "mac00001"),
         .insertLine(opID: "0b5c8e4a-0000-4000-8000-000000000006", path: "2026-09-28.md",
                     line: "- [ ] 09:30 Buy oat milk #home id:mac00001\n  2 liters"),

@@ -102,10 +102,10 @@
       ]
     },
     {
-      "name": "a blank or unindented line ends the body",
+      "name": "blank lines inside the body are paragraph breaks; an unindented line ends it",
       "lines": ["- [ ] 09:00 First", "  note one", "", "  orphan after blank", "- [ ] 10:00 Second", "  note two", "plain text", "  orphan after text"],
       "expected": [
-        { "lineIndex": 0, "completed": false, "time": "09:00", "text": "First", "tags": [], "priority": null, "project": null, "due": null, "metadata": {}, "taskID": null, "body": "note one" },
+        { "lineIndex": 0, "completed": false, "time": "09:00", "text": "First", "tags": [], "priority": null, "project": null, "due": null, "metadata": {}, "taskID": null, "body": "note one\n\norphan after blank" },
         { "lineIndex": 4, "completed": false, "time": "10:00", "text": "Second", "tags": [], "priority": null, "project": null, "due": null, "metadata": {}, "taskID": null, "body": "note two" }
       ]
     },
@@ -121,6 +121,21 @@
       "lines": ["  - [ ] 08:00 indented before any task", "- [ ] 09:00 Parent", "  - [ ] 09:30 looks like a task #tag due:tomorrow"],
       "expected": [
         { "lineIndex": 1, "completed": false, "time": "09:00", "text": "Parent", "tags": [], "priority": null, "project": null, "due": null, "metadata": {}, "taskID": null, "body": "- [ ] 09:30 looks like a task #tag due:tomorrow" }
+      ]
+    },
+    {
+      "name": "blank lines with no body after them are not part of it",
+      "lines": ["- [ ] 09:00 First", "  note", "", "   ", "- [ ] 10:00 Second", "  tail", ""],
+      "expected": [
+        { "lineIndex": 0, "completed": false, "time": "09:00", "text": "First", "tags": [], "priority": null, "project": null, "due": null, "metadata": {}, "taskID": null, "body": "note" },
+        { "lineIndex": 4, "completed": false, "time": "10:00", "text": "Second", "tags": [], "priority": null, "project": null, "due": null, "metadata": {}, "taskID": null, "body": "tail" }
+      ]
+    },
+    {
+      "name": "several blank lines between paragraphs are kept",
+      "lines": ["- [ ] 09:00 Note", "  one", "", "", "  two"],
+      "expected": [
+        { "lineIndex": 0, "completed": false, "time": "09:00", "text": "Note", "tags": [], "priority": null, "project": null, "due": null, "metadata": {}, "taskID": null, "body": "one\n\n\ntwo" }
       ]
     }
   ]

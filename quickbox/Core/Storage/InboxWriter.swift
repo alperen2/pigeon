@@ -123,13 +123,7 @@ final class InboxWriter: InboxWriting {
             components.append("#\(tag)")
         }
         if let due = item.dueDate {
-            // Re-resolve the date to format it consistently based on user settings
-            if let resolvedDue = DueDateResolver().resolve(dueDateString: due, from: captureDate) {
-                let formattedDue = FormatSettings.fileName(for: resolvedDue, preferences: currentPreferences()).replacingOccurrences(of: ".md", with: "")
-                components.append("due:\(formattedDue)")
-            } else {
-                components.append("due:\(due)") // fallback to original if unresolvable
-            }
+            components.append("due:\(Self.formattedDue(due, from: captureDate, preferences: currentPreferences()))")
         }
         
         // Append all dynamic key:value metadata
@@ -146,6 +140,13 @@ final class InboxWriter: InboxWriting {
         let finalString = components.joined(separator: " ")
         let time = FormatSettings.timeText(for: captureDate, preferences: currentPreferences())
         return "- [ ] \(time) \(finalString)"
+    }
+
+    /// A `due:` value as written to the file: natural phrases resolved against `date` and formatted
+    /// like file names; unresolvable values are kept as typed.
+    static func formattedDue(_ due: String, from date: Date, preferences: AppPreferences) -> String {
+        guard let resolvedDue = DueDateResolver().resolve(dueDateString: due, from: date) else { return due }
+        return FormatSettings.fileName(for: resolvedDue, preferences: preferences).replacingOccurrences(of: ".md", with: "")
     }
 
     private func currentPreferences() -> AppPreferences {

@@ -425,9 +425,11 @@ struct quickboxTests {
         let items = try repository.loadToday()
         let item = try #require(items.first)
 
-        _ = try repository.apply(.edit(item.id, text: "first updated"))
+        // The editor shows the tokens with the text; unchanged ones are written back as they were.
+        _ = try repository.apply(.edit(item.id, text: item.editableText.replacingOccurrences(of: "first", with: "first updated")))
         let fileAfterEdit = try String(contentsOf: fileURL)
 
+        #expect(fileAfterEdit.contains("first updated"))
         #expect(fileAfterEdit.contains("due:next friday"))
         #expect(fileAfterEdit.contains("start:in 2 days"))
         #expect(fileAfterEdit.contains("time:30m"))
@@ -496,7 +498,7 @@ struct quickboxTests {
         try "- [ ] 08:00 first #tag id:keepme01\n".write(to: fileURL, atomically: true, encoding: .utf8)
 
         let item = try #require(try repository.loadToday().first)
-        let updated = try repository.apply(.edit(item.id, text: "first updated"))
+        let updated = try repository.apply(.edit(item.id, text: "first updated #tag"))
 
         let content = try String(contentsOf: fileURL)
         #expect(content == "- [ ] 08:00 first updated #tag id:keepme01\n")
@@ -538,7 +540,7 @@ struct quickboxTests {
         try writer.appendEntry("Send report #work\n- add Q3 #notatag\n\n  - nested", now: date)
 
         let content = try String(contentsOf: tempFolder.appendingPathComponent("2026-02-27.md"))
-        #expect(content == "- [ ] 10:30 Send report #work id:body0001\n  - add Q3 #notatag\n    - nested\n")
+        #expect(content == "- [ ] 10:30 Send report #work id:body0001\n  - add Q3 #notatag\n\n    - nested\n")
     }
 
     @Test
@@ -558,11 +560,39 @@ struct quickboxTests {
     }
 
     @Test
+    func listSortsNewestFirstAcrossInboxAndProjectFiles() {
+        let items = [
+            InboxItem(id: "a", text: "inbox early", time: "09:00", isCompleted: false, lineIndex: 7, rawLine: ""),
+            InboxItem(id: "b", text: "project late", time: "14:00", isCompleted: false, lineIndex: 0, rawLine: ""),
+            InboxItem(id: "c", text: "inbox noon", time: "12:15", isCompleted: false, lineIndex: 2, rawLine: ""),
+            InboxItem(id: "d", text: "same minute, later line", time: "12:15", isCompleted: false, lineIndex: 4, rawLine: ""),
+        ]
+
+        #expect(AppState.sorted(items).map(\.id) == ["b", "d", "c", "a"])
+    }
+
+    @Test
     func detailViewReadsListMarkers() {
         #expect(CaptureView.listMarker(of: "- [ ] call")! == ("square", "call"))
         #expect(CaptureView.listMarker(of: "- [x] done")! == ("checkmark.square", "done"))
         #expect(CaptureView.listMarker(of: "* item")! == ("circle.fill", "item"))
         #expect(CaptureView.listMarker(of: "plain - text") == nil)
+    }
+
+    @Test
+    func repositoryEditReplacesTokensButKeepsProvenance() throws {
+        let (repository, fileURL, cleanup) = try makeRepositoryWithTodayFile(
+            "- [ ] 08:00 Draft post !1 #social #work for:me by:claude from:orig0001 ref:_notes/orig0001.md id:edit0001\n"
+        )
+        defer { cleanup() }
+
+        let item = try #require(try repository.loadToday().first)
+        #expect(item.editableText == "Draft post !1 #social #work for:me")
+
+        _ = try repository.apply(.edit(item.id, text: "Draft the post !2 #social @Launch for:agent by:me"))
+
+        #expect(try String(contentsOf: fileURL)
+            == "- [ ] 08:00 Draft the post !2 @Launch #social by:claude for:agent from:orig0001 ref:_notes/orig0001.md id:edit0001\n")
     }
 
     @Test

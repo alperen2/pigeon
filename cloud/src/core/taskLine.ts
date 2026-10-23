@@ -62,16 +62,24 @@ const DATE_PHRASE_TOKENS = new Set([
 export function parseTaskLines(lines: readonly string[], sourceId: string): TaskLine[] {
   const seenTaskIds = new Set<string>();
   const items: { -readonly [K in keyof TaskLine]: TaskLine[K] }[] = [];
-  // Body lines attach to the task right above them, until a blank or unindented line.
+  // Body lines attach to the task right above them, until an unindented line. Blank lines
+  // belong to the body only when more body follows, so paragraphs stay together.
   let collectingBody = false;
+  let pendingBlankLines = 0;
 
   lines.forEach((line, index) => {
     const current = items[items.length - 1];
-    if (collectingBody && current && isBodyLine(line)) {
-      const bodyLine = unindent(line);
-      current.body = current.body === null ? bodyLine : `${current.body}\n${bodyLine}`;
+    if (collectingBody && line.trim() === "") {
+      pendingBlankLines += 1;
       return;
     }
+    if (collectingBody && current && isBodyLine(line)) {
+      const bodyLine = "\n".repeat(pendingBlankLines) + unindent(line);
+      current.body = current.body === null ? bodyLine : `${current.body}\n${bodyLine}`;
+      pendingBlankLines = 0;
+      return;
+    }
+    pendingBlankLines = 0;
     const match = TASK_PATTERN.exec(line);
     collectingBody = match?.groups !== undefined;
     if (!match?.groups) return;
@@ -125,7 +133,10 @@ export function parseTaskLines(lines: readonly string[], sourceId: string): Task
 
 const BODY_INDENT = "  ";
 
-/** A body line starts with a space or a tab and is not blank. Mirrors `TaskBody.swift`. */
+/**
+ * A body line starts with a space or a tab and is not blank. Blank lines between body lines are
+ * paragraph breaks. Mirrors `TaskBody.swift`.
+ */
 function isBodyLine(line: string): boolean {
   return /^[ \t]/.test(line) && line.trim() !== "";
 }
@@ -140,21 +151,21 @@ export function lineCountOf(line: TaskLine): number {
   return 1 + bodyLines(line.body).length;
 }
 
-/** The lines to write under a task line; empty when there is no body. */
+/** The lines to write under a task line; empty when there is no body. Blank lines stay empty. */
 export function bodyLines(body: string | null): string[] {
-  return body === null ? [] : body.split("\n").map((line) => BODY_INDENT + line);
+  return body === null ? [] : body.split("\n").map((line) => (line === "" ? "" : BODY_INDENT + line));
 }
 
 /**
- * Line endings unified, trailing spaces and blank lines (which would end the body in the file)
- * dropped. Returns null when nothing is left.
+ * Line endings unified, trailing spaces and leading or trailing blank lines dropped; blank lines
+ * between paragraphs stay. Returns null when nothing is left.
  */
 export function normalizeBody(body: string): string | null {
-  const lines = body
-    .split(/\r\n|\n|\r/)
-    .map((line) => line.replace(/\s+$/, ""))
-    .filter((line) => line !== "");
-  return lines.length === 0 ? null : lines.join("\n");
+  const lines = body.split(/\r\n|\n|\r/).map((line) => line.replace(/\s+$/, ""));
+  const first = lines.findIndex((line) => line !== "");
+  if (first === -1) return null;
+  const last = lines.length - 1 - [...lines].reverse().findIndex((line) => line !== "");
+  return lines.slice(first, last + 1).join("\n");
 }
 
 /** Parses a single line on its own, e.g. to rebuild it. Unlike in a file, a duplicated id is kept. */

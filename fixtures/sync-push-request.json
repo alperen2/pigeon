@@ -24,7 +24,7 @@
       "opId": "0b5c8e4a-0000-4000-8000-000000000004",
       "type": "update",
       "taskId": "mac00001",
-      "patch": { "text": "Buy oat milk", "body": null }
+      "patch": { "text": "Buy oat milk", "body": null, "priority": 2, "project": null, "tags": ["home", "errand"] }
     },
     {
       "opId": "0b5c8e4a-0000-4000-8000-000000000005",
