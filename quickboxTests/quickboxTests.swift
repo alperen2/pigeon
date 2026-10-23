@@ -547,6 +547,14 @@ struct quickboxTests {
     }
 
     @Test
+    func detailViewReadsListMarkers() {
+        #expect(CaptureView.listMarker(of: "- [ ] call")! == ("square", "call"))
+        #expect(CaptureView.listMarker(of: "- [x] done")! == ("checkmark.square", "done"))
+        #expect(CaptureView.listMarker(of: "* item")! == ("circle.fill", "item"))
+        #expect(CaptureView.listMarker(of: "plain - text") == nil)
+    }
+
+    @Test
     func repositoryKeepsTheBodyWithItsTask() throws {
         let (repository, fileURL, cleanup) = try makeRepositoryWithTodayFile(
             "- [ ] 08:00 Report id:body0002\n  - add Q3\n- [ ] 09:00 Next id:next0001\n"

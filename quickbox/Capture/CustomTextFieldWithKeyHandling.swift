@@ -16,7 +16,7 @@ struct CaptureFieldStyle {
 
     static let capture = CaptureFieldStyle(font: .systemFont(ofSize: 18), bodyFont: .systemFont(ofSize: 15), maxLines: 12)
     static let rowTitle = CaptureFieldStyle(font: .systemFont(ofSize: 13, weight: .medium), maxLines: 3)
-    static let rowNotes = CaptureFieldStyle(font: .systemFont(ofSize: 12), textAlpha: 0.8, placeholderAlpha: 0.4, highlightsSyntax: false, maxLines: 12)
+    static let detailTitle = CaptureFieldStyle(font: .systemFont(ofSize: 15, weight: .semibold), maxLines: 4)
 
     var lineHeight: CGFloat { ceil(font.ascender - font.descender + font.leading) }
 }
@@ -36,6 +36,11 @@ struct CustomTextFieldWithKeyHandling: NSViewRepresentable {
     /// Shift-Return; return true to replace the default, which starts a new line.
     var onShiftEnter: (() -> Bool)?
     var onSubmit: (() -> Void)?
+    /// Called before each text change with the caret's UTF-16 offset, so completions follow the caret.
+    var onCaretChange: ((Int) -> Void)?
+    /// A caret position (UTF-16 offset) to apply once `text` is in the field, e.g. after a completion.
+    var caretRequest: Int?
+    var onCaretRequestApplied: (() -> Void)?
 
     func makeNSView(context: Context) -> CustomNSTextField {
         let textField = CustomNSTextField()
@@ -82,6 +87,12 @@ struct CustomTextFieldWithKeyHandling: NSViewRepresentable {
         nsView.setAccessibilityIdentifier(accessibilityIdentifier)
         nsView.applyPlaceholder(prompt)
         nsView.applySyntaxHighlighting()
+
+        if let caretRequest, let editor = nsView.currentEditor() {
+            let length = (nsView.stringValue as NSString).length
+            editor.selectedRange = NSRange(location: min(caretRequest, length), length: 0)
+            DispatchQueue.main.async { onCaretRequestApplied?() }
+        }
     }
 
     /// Grows with the text up to `style.maxLines`, so a multi-line capture stays readable.
@@ -110,6 +121,9 @@ struct CustomTextFieldWithKeyHandling: NSViewRepresentable {
 
         func controlTextDidChange(_ obj: Notification) {
             guard let textField = obj.object as? CustomNSTextField else { return }
+            if let editor = textField.currentEditor() {
+                parent.onCaretChange?(editor.selectedRange.location)
+            }
             parent.text = textField.stringValue
             textField.applySyntaxHighlighting()
         }
