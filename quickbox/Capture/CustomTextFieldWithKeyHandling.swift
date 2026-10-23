@@ -1,10 +1,31 @@
 import SwiftUI
 import AppKit
 
+/// How a capture-style field looks. The first line is the task; `bodyFont` sets the lines below it apart.
+struct CaptureFieldStyle {
+    var font: NSFont
+    var textAlpha: CGFloat = 0.95
+    var placeholderAlpha: CGFloat = 0.60
+    /// Colors `due:`, `#tag` and other tokens on the first line.
+    var highlightsSyntax = true
+    /// Font for the lines after the first; nil keeps one style for every line.
+    var bodyFont: NSFont?
+    var bodyAlpha: CGFloat = 0.72
+    /// The field grows with its text up to this many lines of `font`.
+    var maxLines: CGFloat
+
+    static let capture = CaptureFieldStyle(font: .systemFont(ofSize: 18), bodyFont: .systemFont(ofSize: 15), maxLines: 12)
+    static let rowTitle = CaptureFieldStyle(font: .systemFont(ofSize: 13, weight: .medium), maxLines: 3)
+    static let detailTitle = CaptureFieldStyle(font: .systemFont(ofSize: 15, weight: .semibold), maxLines: 4)
+
+    var lineHeight: CGFloat { ceil(font.ascender - font.descender + font.leading) }
+}
+
 struct CustomTextFieldWithKeyHandling: NSViewRepresentable {
     @Binding var text: String
     var prompt: String
     var accessibilityIdentifier: String?
+    var style: CaptureFieldStyle = .capture
 
     // Return true if the event was handled by the callback (so the default behavior is swallowed)
     var onUpArrow: (() -> Bool)?
@@ -12,10 +33,18 @@ struct CustomTextFieldWithKeyHandling: NSViewRepresentable {
     var onEnter: (() -> Bool)?
     var onTab: (() -> Bool)?
     var onEscape: (() -> Bool)?
+    /// Shift-Return; return true to replace the default, which starts a new line.
+    var onShiftEnter: (() -> Bool)?
     var onSubmit: (() -> Void)?
+    /// Called before each text change with the caret's UTF-16 offset, so completions follow the caret.
+    var onCaretChange: ((Int) -> Void)?
+    /// A caret position (UTF-16 offset) to apply once `text` is in the field, e.g. after a completion.
+    var caretRequest: Int?
+    var onCaretRequestApplied: (() -> Void)?
 
     func makeNSView(context: Context) -> CustomNSTextField {
         let textField = CustomNSTextField()
+        textField.style = style
         textField.delegate = context.coordinator
         textField.placeholderString = prompt
         textField.applyPlaceholder(prompt)
@@ -24,8 +53,8 @@ struct CustomTextFieldWithKeyHandling: NSViewRepresentable {
         textField.isBezeled = false
         textField.drawsBackground = false
         textField.focusRingType = .none
-        textField.font = .systemFont(ofSize: 18, weight: .regular)
-        textField.textColor = NSColor.white.withAlphaComponent(0.95)
+        textField.font = style.font
+        textField.textColor = NSColor.white.withAlphaComponent(style.textAlpha)
         textField.allowsEditingTextAttributes = true
         textField.importsGraphics = false
         // Shift-Return adds lines (the task's body), so the field wraps and grows instead of scrolling.
@@ -46,6 +75,7 @@ struct CustomTextFieldWithKeyHandling: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: CustomNSTextField, context: Context) {
+        nsView.style = style
         if nsView.stringValue != text {
             nsView.stringValue = text
         }
@@ -57,21 +87,25 @@ struct CustomTextFieldWithKeyHandling: NSViewRepresentable {
         nsView.setAccessibilityIdentifier(accessibilityIdentifier)
         nsView.applyPlaceholder(prompt)
         nsView.applySyntaxHighlighting()
+
+        if let caretRequest, let editor = nsView.currentEditor() {
+            let length = (nsView.stringValue as NSString).length
+            editor.selectedRange = NSRange(location: min(caretRequest, length), length: 0)
+            DispatchQueue.main.async { onCaretRequestApplied?() }
+        }
     }
 
-    /// Grows with the text up to `maxLines`, so a multi-line capture stays readable.
+    /// Grows with the text up to `style.maxLines`, so a multi-line capture stays readable.
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: CustomNSTextField, context: Context) -> CGSize? {
-        guard let width = proposal.width, width > 0, let font = nsView.font else { return nil }
-        let maxLines: CGFloat = 8
-        let lineHeight = ceil(font.ascender - font.descender + font.leading)
+        guard let width = proposal.width, width > 0 else { return nil }
         // A trailing newline starts an empty line that the measurement would otherwise skip.
-        let measured = (text.hasSuffix("\n") ? text + " " : text) as NSString
+        let measured = nsView.styledText(text.hasSuffix("\n") ? text + " " : text)
         let height = measured.boundingRect(
             with: CGSize(width: width, height: .greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: [.font: font]
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
         ).height
-        return CGSize(width: width, height: min(max(lineHeight, ceil(height)), lineHeight * maxLines))
+        let lineHeight = style.lineHeight
+        return CGSize(width: width, height: min(max(lineHeight, ceil(height)), lineHeight * style.maxLines))
     }
 
     func makeCoordinator() -> Coordinator {
@@ -87,6 +121,9 @@ struct CustomTextFieldWithKeyHandling: NSViewRepresentable {
 
         func controlTextDidChange(_ obj: Notification) {
             guard let textField = obj.object as? CustomNSTextField else { return }
+            if let editor = textField.currentEditor() {
+                parent.onCaretChange?(editor.selectedRange.location)
+            }
             parent.text = textField.stringValue
             textField.applySyntaxHighlighting()
         }
@@ -94,7 +131,9 @@ struct CustomTextFieldWithKeyHandling: NSViewRepresentable {
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
                 if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
-                    textView.insertNewlineIgnoringFieldEditor(nil)
+                    if parent.onShiftEnter?() != true {
+                        textView.insertNewlineIgnoringFieldEditor(nil)
+                    }
                     return true
                 }
                 if let onEnter = parent.onEnter, onEnter() {
@@ -148,13 +187,14 @@ class CustomNSTextField: NSTextField {
     var onEnter: (() -> Bool)?
     var onTab: (() -> Bool)?
     var onEscape: (() -> Bool)?
+    var style: CaptureFieldStyle = .capture
 
     func applyPlaceholder(_ prompt: String) {
         placeholderAttributedString = NSAttributedString(
             string: prompt,
             attributes: [
-                .font: NSFont.systemFont(ofSize: 18, weight: .regular),
-                .foregroundColor: NSColor.white.withAlphaComponent(0.60)
+                .font: style.font,
+                .foregroundColor: NSColor.white.withAlphaComponent(style.placeholderAlpha)
             ]
         )
     }
@@ -177,15 +217,7 @@ class CustomNSTextField: NSTextField {
     }
 
     func applySyntaxHighlighting() {
-        let text = stringValue
-        let attributed = NSMutableAttributedString(string: text, attributes: baseAttributes)
-
-        for metadata in metadataHighlightRanges(in: text) {
-            attributed.addAttribute(.foregroundColor, value: fullTokenColor(forMetadataKey: metadata.key), range: metadata.fullRange)
-            attributed.addAttribute(.foregroundColor, value: valueColor(forMetadataKey: metadata.key), range: metadata.valueRange)
-            attributed.addAttribute(.foregroundColor, value: keyColor(forMetadataKey: metadata.key), range: metadata.keyRange)
-            attributed.addAttribute(.font, value: NSFont.systemFont(ofSize: 18, weight: keyFontWeight), range: metadata.keyRange)
-        }
+        let attributed = styledText(stringValue)
 
         if let textView = currentEditor() as? NSTextView, let storage = textView.textStorage {
             let selectedRange = textView.selectedRange()
@@ -197,11 +229,35 @@ class CustomNSTextField: NSTextField {
         }
     }
 
-    private var baseAttributes: [NSAttributedString.Key: Any] {
-        [
-            .font: NSFont.systemFont(ofSize: 18, weight: .regular),
-            .foregroundColor: NSColor.white.withAlphaComponent(0.95)
-        ]
+    /// The text as the field shows it: tokens colored on the first line, body lines in `style.bodyFont`.
+    func styledText(_ text: String) -> NSAttributedString {
+        let attributed = NSMutableAttributedString(string: text, attributes: [
+            .font: style.font,
+            .foregroundColor: NSColor.white.withAlphaComponent(style.textAlpha)
+        ])
+
+        if style.highlightsSyntax {
+            for metadata in metadataHighlightRanges(in: text) {
+                attributed.addAttribute(.foregroundColor, value: fullTokenColor(forMetadataKey: metadata.key), range: metadata.fullRange)
+                attributed.addAttribute(.foregroundColor, value: valueColor(forMetadataKey: metadata.key), range: metadata.valueRange)
+                attributed.addAttribute(.foregroundColor, value: keyColor(forMetadataKey: metadata.key), range: metadata.keyRange)
+                attributed.addAttribute(.font, value: NSFont.systemFont(ofSize: style.font.pointSize, weight: keyFontWeight), range: metadata.keyRange)
+            }
+        }
+
+        let firstLineEnd = (text as NSString).range(of: "\n").location
+        if let bodyFont = style.bodyFont, firstLineEnd != NSNotFound {
+            let bodyRange = NSRange(location: firstLineEnd + 1, length: (text as NSString).length - firstLineEnd - 1)
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineSpacing = 3
+            paragraph.paragraphSpacing = 2
+            attributed.addAttributes([
+                .font: bodyFont,
+                .foregroundColor: NSColor.white.withAlphaComponent(style.bodyAlpha),
+                .paragraphStyle: paragraph
+            ], range: bodyRange)
+        }
+        return attributed
     }
 
     private func metadataHighlightRanges(in text: String) -> [MetadataHighlightRange] {

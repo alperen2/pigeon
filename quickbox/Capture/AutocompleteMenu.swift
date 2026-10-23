@@ -18,7 +18,6 @@ struct AutocompleteMenu: View {
     var onAcceptSuggestion: (Int) -> Void = { _ in }
 
     private let menuWidth: CGFloat = 380
-    private let menuMaxHeight: CGFloat = 248
     private let panelFill = Color(red: 38 / 255, green: 38 / 255, blue: 42 / 255).opacity(0.78)
     private let dividerColor = Color.white.opacity(0.08)
 
@@ -88,10 +87,16 @@ struct AutocompleteMenu: View {
     }
 
     private var menuContentHeight: CGFloat {
-        if suggestions.isEmpty {
-            return 56
-        }
-        return min(menuMaxHeight, CGFloat(suggestions.count) * 34 + 12)
+        Self.contentHeight(suggestionCount: suggestions.count)
+    }
+
+    private static func contentHeight(suggestionCount: Int) -> CGFloat {
+        suggestionCount == 0 ? 56 : min(248, CGFloat(suggestionCount) * 34 + 12)
+    }
+
+    /// The whole menu's height (header, list, footer and padding), for placing it before it is laid out.
+    static func estimatedHeight(suggestionCount: Int) -> CGFloat {
+        contentHeight(suggestionCount: suggestionCount) + 72
     }
 
     @ViewBuilder

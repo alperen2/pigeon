@@ -18,6 +18,17 @@ struct TaskBodyTests {
     }
 
     @Test
+    func togglesOnlyChecklistLines() {
+        let body = "Plan\n- [ ] call\n  - [X] nested\n- not a box"
+
+        #expect(TaskBody.togglingChecklistItem(in: body, atLine: 1) == "Plan\n- [x] call\n  - [X] nested\n- not a box")
+        #expect(TaskBody.togglingChecklistItem(in: body, atLine: 2) == "Plan\n- [ ] call\n  - [ ] nested\n- not a box")
+        #expect(TaskBody.togglingChecklistItem(in: body, atLine: 0) == nil)
+        #expect(TaskBody.togglingChecklistItem(in: body, atLine: 3) == nil)
+        #expect(TaskBody.togglingChecklistItem(in: body, atLine: 9) == nil)
+    }
+
+    @Test
     func bodyRoundTripsThroughTheFile() {
         let body = "- add Q3\n  - nested"
         let lines = ["- [ ] 09:00 Send report"] + TaskBody.lines(body)

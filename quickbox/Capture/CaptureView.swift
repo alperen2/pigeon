@@ -13,10 +13,19 @@ enum CaptureMode {
     case minimal
 }
 
+/// Where the row being edited has its title field, so its suggestions can float above the list.
+private struct RowEditorAnchorKey: PreferenceKey {
+    static let defaultValue: Anchor<CGRect>? = nil
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = value ?? nextValue()
+    }
+}
+
 struct CaptureView: View {
     private enum FocusTarget: Hashable {
         case capture
         case rowEditor
+        case rowEditorNotes
     }
 
     private enum Layout {
@@ -53,8 +62,19 @@ struct CaptureView: View {
         static let bodyFont = NSFont.systemFont(ofSize: 12, weight: .regular)
         static let bodyLineHeight = ceil(bodyFont.ascender - bodyFont.descender + bodyFont.leading)
         static let maxBodyLines: CGFloat = 2
+        static let bodyLineSpacing: CGFloat = 2
         static let bodySpacing: CGFloat = 2
-        static let maxEditingLines: CGFloat = 6
+        static let editorSpacing: CGFloat = 4
+        static let editorHintHeight: CGFloat = 13
+        static let detailSpacing: CGFloat = 10
+        static let detailHorizontalPadding: CGFloat = 18
+        static let detailVerticalPadding: CGFloat = 14
+        static let detailLineSpacing: CGFloat = 3
+        static let detailParagraphSpacing: CGFloat = 5
+        static let detailMaxBodyHeight: CGFloat = 340
+        static let detailEditorHeight: CGFloat = 220
+        /// Past this many characters on one line, the capture hint suggests moving text to notes.
+        static let longTitleLength = 100
         /// The project, tag and metadata chips under the text, plus the stack spacing above them.
         static let chipRowHeight: CGFloat = 24
     }
@@ -65,6 +85,8 @@ struct CaptureView: View {
         static let tertiaryLabel = Color.white.opacity(0.36)
         static let fill = Color.white.opacity(0.10)
         static let fillMuted = Color.white.opacity(0.06)
+        /// Brand "Coral light", the link color on dark backgrounds (brand/README.md).
+        static let link = Color(red: 0xFF / 255, green: 0x7C / 255, blue: 0x8B / 255)
         static let divider = Color.white.opacity(0.08)
         static let panelFill = Color(red: 38 / 255, green: 38 / 255, blue: 42 / 255).opacity(0.72)
     }
@@ -77,13 +99,22 @@ struct CaptureView: View {
     @State private var animateIn = false
     @State private var hoveredItemID: String?
     @State private var editingItemID: String?
-    @State private var editingDraftText: String = ""
+    @State private var editingTitleText: String = ""
+    @State private var editingNotesText: String = ""
+    /// The task shown on its own in place of the list, with its whole note.
+    @State private var detailItemID: String?
     
     // Autocomplete State
     @State private var autocompleteType: AutocompleteType = .none
     @State private var autocompleteSuggestions: [String] = []
     @State private var autocompleteSelectedIndex: Int = 0
     @State private var autocompleteReplacementTokenRange: Range<Int>? = nil
+    /// The field the open suggestions belong to: the capture input or a row's title editor.
+    @State private var autocompleteTarget: FocusTarget = .capture
+    /// Caret (UTF-16 offset) of the field being typed in; suggestions complete the word before it.
+    @State private var autocompleteCaret: Int?
+    /// Where to put the caret after a completion rewrote the text.
+    @State private var pendingCaret: (target: FocusTarget, offset: Int)?
     @State private var availableTags: [String] = []
     @State private var availableProjects: [String] = []
     @State private var isCalendarViewActive: Bool = false
@@ -132,6 +163,7 @@ struct CaptureView: View {
             notifyHeightChange()
         }
         .onChange(of: appState.selectedInboxDate) {
+            detailItemID = nil
             if isCalendarViewActive && !isSameMonth(appState.selectedInboxDate, calendarMonthAnchor) {
                 calendarMonthAnchor = appState.selectedInboxDate
             }
@@ -141,6 +173,7 @@ struct CaptureView: View {
             notifyHeightChange()
         }
         .onChange(of: appState.draftText) {
+            autocompleteTarget = .capture
             handleTextChange(appState.draftText)
             analyzeDraftInsights()
             if appState.captureMessage != nil {
@@ -187,11 +220,34 @@ struct CaptureView: View {
             }
             notifyHeightChange()
         }
+        .onChange(of: editingTitleText) {
+            guard editingItemID != nil else { return }
+            autocompleteTarget = .rowEditor
+            handleTextChange(editingTitleText)
+            notifyHeightChange()
+        }
+        .onChange(of: editingNotesText) {
+            notifyHeightChange()
+        }
+        .overlayPreferenceValue(RowEditorAnchorKey.self) { anchor in
+            GeometryReader { proxy in
+                if let anchor, editingItemID != nil, autocompleteTarget == .rowEditor, shouldShowAutocompleteMenu {
+                    let field = proxy[anchor]
+                    let menuHeight = AutocompleteMenu.estimatedHeight(suggestionCount: autocompleteSuggestions.count)
+                    // Open below the title; flip above it when the panel has no room underneath.
+                    let fitsBelow = field.maxY + 4 + menuHeight <= proxy.size.height
+                    rowEditorAutocompleteMenu
+                        .offset(x: field.minX, y: fitsBelow ? field.maxY + 4 : max(0, field.minY - menuHeight - 4))
+                }
+            }
+        }
         .onExitCommand {
             if isCalendarViewActive {
                 closeCalendarView()
             } else if editingItemID != nil {
                 cancelEditing()
+            } else if detailItemID != nil {
+                closeDetail()
             } else if shouldShowAutocompleteMenu {
                 closeAutocomplete()
             } else {
@@ -267,7 +323,10 @@ struct CaptureView: View {
                         if autocompleteSuggestions.isEmpty {
                             submit()
                         }
-                    }
+                    },
+                    onCaretChange: { autocompleteCaret = $0 },
+                    caretRequest: pendingCaret?.target == .capture ? pendingCaret?.offset : nil,
+                    onCaretRequestApplied: { pendingCaret = nil }
                 )
                 .focused($focusedField, equals: .capture)
 
@@ -279,7 +338,7 @@ struct CaptureView: View {
             .padding(.horizontal, Layout.captureHorizontalPadding)
             .padding(.bottom, Layout.captureRowBottomPadding)
             .overlay(alignment: .topLeading) {
-                if shouldShowAutocompleteMenu {
+                if shouldShowAutocompleteMenu && autocompleteTarget == .capture {
                     AutocompleteMenu(
                         mode: autocompleteType,
                         suggestions: autocompleteSuggestions,
@@ -363,6 +422,12 @@ struct CaptureView: View {
                 Text("↑↓ choose • Tab complete • Enter save • Esc close")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Style.tertiaryLabel)
+            } else if isDraftTitleLong {
+                // A long first line is usually a note: point to the body instead of splitting it silently.
+                Label("Long title. Shift-Return moves the rest to notes.", systemImage: "text.append")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Style.secondaryLabel)
+                    .accessibilityIdentifier("capture-long-title-hint")
             } else {
                 HStack(spacing: 6) {
                     hintToken("@", "project")
@@ -377,6 +442,10 @@ struct CaptureView: View {
                 }
             }
         }
+    }
+
+    private var isDraftTitleLong: Bool {
+        !appState.draftText.contains("\n") && appState.draftText.count > Layout.longTitleLength
     }
 
     private func hintToken(_ token: String, _ label: String) -> some View {
@@ -420,13 +489,23 @@ struct CaptureView: View {
     }
     
     // MARK: - Autocomplete Logic
+    /// The part of `text` before the caret: completions work on the word being typed, wherever it is.
+    private func textBeforeCaret(_ text: String) -> Substring {
+        guard let caret = autocompleteCaret else { return text[...] }
+        let utf16 = text.utf16
+        let end = utf16.index(utf16.startIndex, offsetBy: min(max(0, caret), utf16.count))
+        return text[..<(end.samePosition(in: text) ?? text.endIndex)]
+    }
+
     private func handleTextChange(_ newText: String) {
-        if newText.last?.isWhitespace == true {
+        let beforeCaret = textBeforeCaret(newText)
+        // Suggestions complete tokens, which only exist on the first line; the rest is the body.
+        if beforeCaret.last?.isWhitespace == true || beforeCaret.contains("\n") {
             closeAutocomplete()
             return
         }
 
-        let tokens = newText.split(whereSeparator: \.isWhitespace).map(String.init)
+        let tokens = beforeCaret.split(whereSeparator: \.isWhitespace).map(String.init)
         guard let lastWord = tokens.last, !lastWord.isEmpty else {
             closeAutocomplete()
             return
@@ -520,6 +599,8 @@ struct CaptureView: View {
     }
     
     private func closeAutocomplete() {
+        // Typing reports a fresh caret before every change; programmatic text has none.
+        autocompleteCaret = nil
         autocompleteType = .none
         autocompleteSuggestions = []
         autocompleteSelectedIndex = 0
@@ -671,10 +752,13 @@ struct CaptureView: View {
         guard autocompleteSuggestions.indices.contains(autocompleteSelectedIndex) else { return }
         let accepted = autocompleteSuggestions[autocompleteSelectedIndex]
 
-        var tokens = appState.draftText.split(whereSeparator: \.isWhitespace).map(String.init)
+        let text = autocompleteText
+        let beforeCaret = textBeforeCaret(text)
+        let tokenRanges = beforeCaret.ranges(of: /\S+/)
         guard let tokenRange = autocompleteReplacementTokenRange,
               tokenRange.lowerBound >= 0,
-              tokenRange.upperBound <= tokens.count else {
+              tokenRange.upperBound <= tokenRanges.count,
+              tokenRange.upperBound == tokenRanges.count else {
             closeAutocomplete()
             return
         }
@@ -701,15 +785,57 @@ struct CaptureView: View {
             return
         }
 
-        tokens.replaceSubrange(tokenRange, with: [replacement])
-        let updatedText = tokens.joined(separator: " ")
-        appState.draftText = shouldAppendTrailingSpace ? (updatedText + " ") : updatedText
+        // Replace only the words being completed; everything else keeps its exact spelling.
+        let prefix = text[..<tokenRanges[tokenRange.lowerBound].lowerBound]
+        var suffix = text[beforeCaret.endIndex...]
+        // The rest of a word the caret was inside belongs to the completed token.
+        suffix = suffix.drop(while: { !$0.isWhitespace })
+        let inserted = replacement + (shouldAppendTrailingSpace && !(suffix.first?.isWhitespace ?? false) ? " " : "")
+        let target = autocompleteTarget
         closeAutocomplete()
+        autocompleteText = String(prefix) + inserted + suffix
+        let caret = (String(prefix) + inserted).utf16.count + (shouldAppendTrailingSpace && suffix.first?.isWhitespace == true ? 1 : 0)
+        autocompleteCaret = caret
+        pendingCaret = (target, caret)
+    }
+
+    /// The text of the field the suggestions belong to.
+    private var autocompleteText: String {
+        get { autocompleteTarget == .rowEditor ? editingTitleText : appState.draftText }
+        nonmutating set {
+            if autocompleteTarget == .rowEditor {
+                editingTitleText = newValue
+            } else {
+                appState.draftText = newValue
+            }
+        }
+    }
+
+    private var rowEditorAutocompleteMenu: some View {
+        AutocompleteMenu(
+            mode: autocompleteType,
+            suggestions: autocompleteSuggestions,
+            selectedIndex: autocompleteSelectedIndex,
+            onSelectIndex: { index in
+                autocompleteSelectedIndex = index
+            },
+            onAcceptSuggestion: { index in
+                acceptAutocomplete(at: index)
+            }
+        )
     }
 
     @ViewBuilder
     private var spotlightSection: some View {
-        if isCalendarViewActive {
+        if !isCalendarViewActive, let item = detailItem {
+            VStack(alignment: .leading, spacing: 0) {
+                taskDetail(item)
+                spotlightMessage
+            }
+            .frame(width: Layout.panelVisualWidth, alignment: .leading)
+            .background(panelBackground(cornerRadius: Layout.todayCornerRadius))
+            .zIndex(1)
+        } else if isCalendarViewActive {
             VStack(alignment: .leading, spacing: 10) {
                 spotlightCalendar
 
@@ -1308,6 +1434,12 @@ struct CaptureView: View {
             return
         }
 
+        let staticHeight: CGFloat = 184
+        if let item = detailItem {
+            NotificationCenter.default.post(name: .quickboxCaptureHeightDidChange, object: staticHeight + detailContentHeight(for: item))
+            return
+        }
+
         let itemsForSizing = Array(appState.visibleInboxItems.prefix(8))
         let rowsHeight = itemsForSizing.reduce(CGFloat.zero) { partial, item in
             partial + estimatedRowHeight(for: item)
@@ -1315,7 +1447,6 @@ struct CaptureView: View {
         let separators = CGFloat(max(itemsForSizing.count - 1, 0))
         let separatorsHeight = separators * (Layout.rowSeparatorHeight + (Layout.rowSeparatorVerticalPadding * 2))
         let listHeight = rowsHeight + separatorsHeight
-        let staticHeight: CGFloat = 184
         let totalHeight = staticHeight + max(84, listHeight)
         NotificationCenter.default.post(name: .quickboxCaptureHeightDidChange, object: totalHeight)
     }
@@ -1338,8 +1469,9 @@ struct CaptureView: View {
         return rowsHeight + separatorsHeight
     }
 
-    private func estimatedRowHeight(for item: InboxItem) -> CGFloat {
-        let availableTextWidth = max(
+    /// Width of a row's text column: the panel minus padding, the checkbox, the time and the action buttons.
+    private var rowTextWidth: CGFloat {
+        max(
             140,
             panelWidth
             - (16 * 2)
@@ -1350,35 +1482,27 @@ struct CaptureView: View {
             - Layout.trailingIconWidth
             - (Layout.rowSpacing * 2)
         )
+    }
 
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.lineBreakMode = .byWordWrapping
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: Layout.textFont,
-            .paragraphStyle: paragraphStyle
-        ]
-
-        func height(of text: String, font: NSFont, lineHeight: CGFloat, maxLines: CGFloat) -> CGFloat {
-            var fontAttributes = attributes
-            fontAttributes[.font] = font
-            let rect = (text as NSString).boundingRect(
-                with: CGSize(width: availableTextWidth, height: .greatestFiniteMagnitude),
+    private func estimatedRowHeight(for item: InboxItem) -> CGFloat {
+        func height(of text: String, style: CaptureFieldStyle) -> CGFloat {
+            // A trailing newline starts an empty line that the measurement would otherwise skip.
+            let measured = text.hasSuffix("\n") ? text + " " : text
+            let rect = (measured as NSString).boundingRect(
+                with: CGSize(width: rowTextWidth, height: .greatestFiniteMagnitude),
                 options: [.usesLineFragmentOrigin, .usesFontLeading],
-                attributes: fontAttributes
+                attributes: [.font: style.font]
             )
-            return min(max(lineHeight, ceil(rect.height)), lineHeight * maxLines)
+            return min(max(style.lineHeight, ceil(rect.height)), style.lineHeight * style.maxLines)
         }
 
         var clampedTextHeight: CGFloat
         if editingItemID == item.id {
-            // The editor shows the title and body together and grows as lines are added.
-            let draft = editingDraftText.hasSuffix("\n") ? editingDraftText + " " : editingDraftText
-            clampedTextHeight = height(of: draft, font: Layout.textFont, lineHeight: Layout.textLineHeight, maxLines: Layout.maxEditingLines)
+            clampedTextHeight = height(of: editingTitleText, style: .rowTitle) + Layout.editorSpacing + Layout.editorHintHeight
         } else {
-            clampedTextHeight = height(of: item.text, font: Layout.textFont, lineHeight: Layout.textLineHeight, maxLines: Layout.maxTextLines)
+            clampedTextHeight = height(of: item.text, style: CaptureFieldStyle(font: Layout.textFont, maxLines: Layout.maxTextLines))
             if let body = item.body {
-                clampedTextHeight += Layout.bodySpacing
-                    + height(of: body, font: Layout.bodyFont, lineHeight: Layout.bodyLineHeight, maxLines: Layout.maxBodyLines)
+                clampedTextHeight += Layout.bodySpacing + bodyTextHeight(body, maxLines: Layout.maxBodyLines)
             }
             if !item.tags.isEmpty || item.projectName != nil || !item.metadata.isEmpty {
                 clampedTextHeight += Layout.chipRowHeight
@@ -1502,16 +1626,7 @@ struct CaptureView: View {
 
                 HStack(alignment: .top, spacing: 8) {
                     if isEditing {
-                        // Option-Return adds a line; the lines after the first are the task's body.
-                        TextField("Edit task", text: $editingDraftText, axis: .vertical)
-                            .lineLimit(1...Int(Layout.maxEditingLines))
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Style.label)
-                            .focused($focusedField, equals: .rowEditor)
-                            .onSubmit {
-                                saveEditing(item)
-                            }
+                        rowEditor(for: item)
                     } else {
                         VStack(alignment: .leading, spacing: 4) {
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -1531,11 +1646,7 @@ struct CaptureView: View {
                             }
 
                             if let body = item.body {
-                                Text(body)
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(Style.secondaryLabel)
-                                    .lineLimit(Int(Layout.maxBodyLines))
-                                    .fixedSize(horizontal: false, vertical: true)
+                                rowBody(body, for: item)
                                     .padding(.top, -2)
                             }
                                 
@@ -1697,20 +1808,429 @@ struct CaptureView: View {
         .help(tooltip)
     }
 
+    /// Inline edit in the list: the title only, with the capture field's suggestions and colors.
+    /// Notes are edited in the task's detail view, which Shift-Return or Tab opens.
+    private func rowEditor(for item: InboxItem) -> some View {
+        VStack(alignment: .leading, spacing: Layout.editorSpacing) {
+            titleEditorField(for: item, style: .rowTitle) {
+                openDetail(item, editingNotes: true)
+            }
+
+            Text("Return save • Shift-Return notes • Esc cancel")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Style.tertiaryLabel)
+        }
+    }
+
+    /// The title editor, shared by the list row and the detail view. `onNotes` runs on Shift-Return
+    /// or Tab when no suggestion is open.
+    private func titleEditorField(for item: InboxItem, style: CaptureFieldStyle, onNotes: @escaping () -> Void) -> some View {
+        CustomTextFieldWithKeyHandling(
+            text: $editingTitleText,
+            prompt: "Task",
+            accessibilityIdentifier: "row-editor-title",
+            style: style,
+            onUpArrow: {
+                guard !autocompleteSuggestions.isEmpty else { return false }
+                autocompleteSelectedIndex = max(0, autocompleteSelectedIndex - 1)
+                return true
+            },
+            onDownArrow: {
+                guard !autocompleteSuggestions.isEmpty else { return false }
+                autocompleteSelectedIndex = min(autocompleteSuggestions.count - 1, autocompleteSelectedIndex + 1)
+                return true
+            },
+            onEnter: {
+                guard !autocompleteSuggestions.isEmpty else { return false }
+                acceptAutocomplete()
+                return true
+            },
+            onTab: {
+                if !autocompleteSuggestions.isEmpty {
+                    acceptAutocomplete()
+                } else {
+                    onNotes()
+                }
+                return true
+            },
+            onEscape: {
+                if shouldShowAutocompleteMenu {
+                    closeAutocomplete()
+                } else {
+                    cancelEditing()
+                }
+                return true
+            },
+            onShiftEnter: {
+                onNotes()
+                return true
+            },
+            onSubmit: {
+                saveEditing(item)
+            },
+            onCaretChange: { autocompleteCaret = $0 },
+            caretRequest: pendingCaret?.target == .rowEditor ? pendingCaret?.offset : nil,
+            onCaretRequestApplied: { pendingCaret = nil }
+        )
+        .focused($focusedField, equals: .rowEditor)
+        .anchorPreference(key: RowEditorAnchorKey.self, value: .bounds) { $0 }
+    }
+
+    /// A short body preview; clicking it opens the task's detail view with the whole note.
+    private func rowBody(_ body: String, for item: InboxItem) -> some View {
+        Button {
+            openDetail(item)
+        } label: {
+            HStack(alignment: .lastTextBaseline, spacing: 4) {
+                Text(Self.inlineMarkdown(Self.displayBody(body)))
+                    .font(.system(size: 12))
+                    .foregroundStyle(Style.secondaryLabel)
+                    .lineSpacing(Layout.bodyLineSpacing)
+                    .lineLimit(Int(Layout.maxBodyLines))
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                if isBodyTruncatable(body) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Style.tertiaryLabel)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Open note")
+    }
+
+    /// Markdown list markers (`- `, `* `) read better as bullets; the stored text is unchanged.
+    static func displayBody(_ body: String) -> String {
+        body.components(separatedBy: "\n").map { line in
+            let indent = line.prefix(while: { $0 == " " || $0 == "\t" })
+            let rest = line.dropFirst(indent.count)
+            guard rest.hasPrefix("- ") || rest.hasPrefix("* ") else { return line }
+            return indent + "• " + rest.dropFirst(2)
+        }.joined(separator: "\n")
+    }
+
+    private func isBodyTruncatable(_ body: String) -> Bool {
+        bodyTextHeight(body, maxLines: .greatestFiniteMagnitude) > bodyTextHeight(body, maxLines: Layout.maxBodyLines)
+    }
+
+    private func bodyTextHeight(_ body: String, maxLines: CGFloat) -> CGFloat {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = Layout.bodyLineSpacing
+        let rect = (Self.displayBody(body) as NSString).boundingRect(
+            with: CGSize(width: rowTextWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: Layout.bodyFont, .paragraphStyle: paragraph]
+        )
+        let lineHeight = Layout.bodyLineHeight + Layout.bodyLineSpacing
+        return min(max(Layout.bodyLineHeight, ceil(rect.height)), lineHeight * maxLines)
+    }
+
+    // MARK: - Task detail
+
+    /// The task the detail view shows, while it is still on the selected day.
+    private var detailItem: InboxItem? {
+        detailItemID.flatMap { id in appState.visibleInboxItems.first { $0.id == id } }
+    }
+
+    private func openDetail(_ item: InboxItem, editingNotes: Bool = false) {
+        closeAutocomplete()
+        detailItemID = item.id
+        hoveredItemID = nil
+        if editingNotes {
+            if editingItemID != item.id {
+                editingItemID = item.id
+                editingTitleText = item.text
+                editingNotesText = item.body ?? ""
+            }
+            DispatchQueue.main.async { focusedField = .rowEditorNotes }
+        }
+        notifyHeightChange()
+    }
+
+    private func closeDetail() {
+        if editingItemID != nil {
+            cancelEditing()
+        }
+        detailItemID = nil
+        focusedField = .capture
+        notifyHeightChange()
+    }
+
+    /// One task on its own: the whole note at a readable size, scrolling when it is long.
+    /// Edit swaps the note for a multi-line editor where Return starts a new line.
+    private func taskDetail(_ item: InboxItem) -> some View {
+        let isEditing = editingItemID == item.id
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Button {
+                    closeDetail()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                        Text(appState.selectedInboxDateLabel)
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Style.label)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: Layout.controlCornerRadius, style: .continuous)
+                            .fill(Style.fillMuted)
+                    )
+                }
+                .buttonStyle(.plain)
+                .help("Back to the list (Esc)")
+
+                Spacer()
+
+                if !isEditing {
+                    sideActionButton(tooltip: item.isCompleted ? "Mark as open" : "Mark as done",
+                                     systemImage: item.isCompleted ? "arrow.uturn.backward" : "checkmark",
+                                     tint: Color.white.opacity(0.85)) {
+                        appState.handleSpotlightMutation(.toggle(item.id))
+                    }
+                    sideActionButton(tooltip: "Edit", systemImage: "pencil", tint: Color.white.opacity(0.85)) {
+                        startEditing(item)
+                        openDetail(item, editingNotes: false)
+                    }
+                    sideActionButton(tooltip: "Delete", systemImage: "trash", tint: Color.red.opacity(0.9)) {
+                        detailItemID = nil
+                        appState.handleSpotlightMutation(.delete(item.id))
+                        notifyHeightChange()
+                    }
+                }
+            }
+            .padding(.horizontal, Layout.todayHeaderHorizontalPadding)
+            .padding(.vertical, Layout.todayHeaderVerticalPadding)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(Style.divider).frame(height: 0.5)
+            }
+
+            VStack(alignment: .leading, spacing: Layout.detailSpacing) {
+                if isEditing {
+                    titleEditorField(for: item, style: .detailTitle) {
+                        focusedField = .rowEditorNotes
+                    }
+                } else {
+                    Text(item.text)
+                        .font(.system(size: 15, weight: .semibold))
+                        .strikethrough(item.isCompleted)
+                        .foregroundStyle(item.isCompleted ? Style.tertiaryLabel : Style.label)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+
+                Text(detailMetaLine(for: item))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Style.secondaryLabel)
+
+                Rectangle().fill(Style.divider).frame(height: 0.5)
+
+                if isEditing {
+                    TextEditor(text: $editingNotesText)
+                        .font(.system(size: 13))
+                        .lineSpacing(Layout.detailLineSpacing)
+                        .foregroundStyle(Style.label)
+                        .scrollContentBackground(.hidden)
+                        .focused($focusedField, equals: .rowEditorNotes)
+                        .frame(height: Layout.detailEditorHeight)
+                        .accessibilityIdentifier("detail-notes-editor")
+
+                    HStack(spacing: 8) {
+                        Text("Return new line • ⌘Return save • Esc cancel")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Style.tertiaryLabel)
+                        Spacer()
+                        Button("Cancel") { cancelEditing() }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Style.secondaryLabel)
+                        Button("Save") { saveEditing(item) }
+                            .keyboardShortcut(.return, modifiers: .command)
+                            .buttonStyle(.plain)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Style.label)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Capsule(style: .continuous).fill(Style.fill))
+                    }
+                } else if let body = item.body {
+                    ScrollView {
+                        detailBody(body, for: item)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(height: detailBodyViewportHeight(body))
+                } else {
+                    Button {
+                        startEditing(item)
+                        openDetail(item, editingNotes: true)
+                    } label: {
+                        Label("Add notes", systemImage: "square.and.pencil")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Style.secondaryLabel)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, Layout.detailHorizontalPadding)
+            .padding(.vertical, Layout.detailVerticalPadding)
+        }
+    }
+
+    /// The note as readable text: list markers become bullets or checkboxes with a hanging indent,
+    /// checkboxes toggle on click, and links, **bold** and *italic* render as Markdown.
+    private func detailBody(_ body: String, for item: InboxItem) -> some View {
+        VStack(alignment: .leading, spacing: Layout.detailParagraphSpacing) {
+            ForEach(Array(body.components(separatedBy: "\n").enumerated()), id: \.offset) { index, line in
+                let indent = line.prefix(while: { $0 == " " || $0 == "\t" })
+                let rest = String(line.dropFirst(indent.count))
+                let level = CGFloat(indent.reduce(0) { $0 + ($1 == "\t" ? 2 : 1) }) / 2
+                let marker = Self.listMarker(of: rest)
+                let isCheckedItem = marker?.symbol == "checkmark.square"
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if let marker {
+                        if marker.symbol == "circle.fill" {
+                            Image(systemName: marker.symbol)
+                                .font(.system(size: 4, weight: .semibold))
+                                .foregroundStyle(Style.secondaryLabel)
+                                .frame(width: 14)
+                        } else {
+                            Button {
+                                toggleChecklistItem(of: item, atLine: index)
+                            } label: {
+                                Image(systemName: marker.symbol)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(isCheckedItem ? Style.tertiaryLabel : Style.secondaryLabel)
+                                    .frame(width: 14)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help(isCheckedItem ? "Mark as not done" : "Mark as done")
+                        }
+                        Text(Self.inlineMarkdown(marker.text))
+                            .strikethrough(isCheckedItem)
+                            .foregroundStyle(isCheckedItem ? Style.tertiaryLabel : Color.white.opacity(0.86))
+                    } else {
+                        Text(Self.inlineMarkdown(rest))
+                    }
+                }
+                .font(.system(size: 13))
+                .lineSpacing(Layout.detailLineSpacing)
+                .foregroundStyle(Color.white.opacity(0.86))
+                .tint(Style.link)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, level * 14)
+            }
+        }
+        .textSelection(.enabled)
+    }
+
+    private func toggleChecklistItem(of item: InboxItem, atLine index: Int) {
+        guard let body = item.body, let toggled = TaskBody.togglingChecklistItem(in: body, atLine: index) else { return }
+        _ = appState.editInboxItem(id: item.id, text: TaskBody.joined(title: item.text, body: toggled))
+    }
+
+    /// Inline Markdown (links, **bold**, *italic*, `code`) with bare URLs made clickable too.
+    /// Display only: the stored note keeps its Markdown as typed.
+    static func inlineMarkdown(_ text: String) -> AttributedString {
+        var attributed = (try? AttributedString(
+            markdown: text,
+            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(text)
+
+        let plain = String(attributed.characters)
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return attributed }
+        for match in detector.matches(in: plain, range: NSRange(plain.startIndex..., in: plain)) {
+            guard let url = match.url, let range = Range(match.range, in: plain) else { continue }
+            let start = attributed.index(attributed.startIndex, offsetByCharacters: plain.distance(from: plain.startIndex, to: range.lowerBound))
+            let end = attributed.index(start, offsetByCharacters: plain.distance(from: range.lowerBound, to: range.upperBound))
+            if attributed[start..<end].link == nil {
+                attributed[start..<end].link = url
+            }
+        }
+        return attributed
+    }
+
+    /// `- [ ] x`, `- [x] x`, `- x` and `* x` as a symbol and the text after the marker.
+    static func listMarker(of line: String) -> (symbol: String, text: String)? {
+        for (prefix, symbol) in [("- [ ] ", "square"), ("- [x] ", "checkmark.square"), ("- [X] ", "checkmark.square")] where line.hasPrefix(prefix) {
+            return (symbol, String(line.dropFirst(prefix.count)))
+        }
+        if line.hasPrefix("- ") || line.hasPrefix("* ") {
+            return ("circle.fill", String(line.dropFirst(2)))
+        }
+        return nil
+    }
+
+    private func detailMetaLine(for item: InboxItem) -> String {
+        var parts = [item.time]
+        if let project = item.projectName { parts.append("@\(project)") }
+        parts += item.tags.map { "#\($0)" }
+        if let due = item.dueDate { parts.append("due:\(due)") }
+        parts += item.metadata.keys.sorted().compactMap { key in item.metadata[key].map { "\(key):\($0)" } }
+        return parts.joined(separator: "  ·  ")
+    }
+
+    private var detailTextWidth: CGFloat {
+        Layout.panelVisualWidth - Layout.detailHorizontalPadding * 2
+    }
+
+    /// The note's height at the detail view's size, capped so a long note scrolls inside the panel.
+    private func detailBodyViewportHeight(_ body: String) -> CGFloat {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = Layout.detailLineSpacing
+        paragraph.paragraphSpacing = Layout.detailParagraphSpacing
+        let rect = (Self.displayBody(body) as NSString).boundingRect(
+            with: CGSize(width: detailTextWidth - 40, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: NSFont.systemFont(ofSize: 13), .paragraphStyle: paragraph]
+        )
+        return min(max(20, ceil(rect.height) + 8), Layout.detailMaxBodyHeight)
+    }
+
+    /// Height of the detail view below its header, for sizing the panel.
+    private func detailContentHeight(for item: InboxItem) -> CGFloat {
+        let isEditing = editingItemID == item.id
+        let titleFont = isEditing ? CaptureFieldStyle.detailTitle.font : NSFont.systemFont(ofSize: 15, weight: .semibold)
+        let titleHeight = ceil((item.text as NSString).boundingRect(
+            with: CGSize(width: detailTextWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: titleFont]
+        ).height)
+        let bodyHeight: CGFloat
+        if isEditing {
+            bodyHeight = Layout.detailEditorHeight + Layout.detailSpacing + 24
+        } else if let body = item.body {
+            bodyHeight = detailBodyViewportHeight(body)
+        } else {
+            bodyHeight = 18
+        }
+        return Layout.detailVerticalPadding * 2 + titleHeight + 14 + 0.5 + bodyHeight + Layout.detailSpacing * 3
+    }
+
     private func startEditing(_ item: InboxItem) {
+        closeAutocomplete()
         editingItemID = item.id
-        editingDraftText = TaskBody.joined(title: item.text, body: item.body)
+        editingTitleText = item.text
+        editingNotesText = item.body ?? ""
         focusRowEditorWithoutSelectingAll()
     }
 
     private func cancelEditing() {
+        closeAutocomplete()
         editingItemID = nil
-        editingDraftText = ""
+        editingTitleText = ""
+        editingNotesText = ""
         focusedField = .capture
     }
 
     private func saveEditing(_ item: InboxItem) {
-        let cleaned = editingDraftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleaned = TaskBody.joined(
+            title: editingTitleText.trimmingCharacters(in: .whitespacesAndNewlines),
+            body: TaskBody.normalized(editingNotesText)
+        )
         guard cleaned != TaskBody.joined(title: item.text, body: item.body) else {
             cancelEditing()
             return

@@ -542,6 +542,30 @@ struct quickboxTests {
     }
 
     @Test
+    func bodyPreviewDrawsListMarkersAsBullets() {
+        #expect(CaptureView.displayBody("- one\n  * nested\nplain - text\n-no space") == "• one\n  • nested\nplain - text\n-no space")
+    }
+
+    @Test
+    func noteMarkdownLinksBareURLsAndKeepsEmphasis() throws {
+        let rendered = CaptureView.inlineMarkdown("**Brief** at https://usepigeon.cc and [docs](https://usepigeon.cc/usage)")
+
+        #expect(String(rendered.characters) == "Brief at https://usepigeon.cc and docs")
+        let links = rendered.runs.compactMap(\.link)
+        #expect(links == [URL(string: "https://usepigeon.cc")!, URL(string: "https://usepigeon.cc/usage")!])
+        let boldRun = try #require(rendered.runs.first)
+        #expect(boldRun.inlinePresentationIntent == .stronglyEmphasized)
+    }
+
+    @Test
+    func detailViewReadsListMarkers() {
+        #expect(CaptureView.listMarker(of: "- [ ] call")! == ("square", "call"))
+        #expect(CaptureView.listMarker(of: "- [x] done")! == ("checkmark.square", "done"))
+        #expect(CaptureView.listMarker(of: "* item")! == ("circle.fill", "item"))
+        #expect(CaptureView.listMarker(of: "plain - text") == nil)
+    }
+
+    @Test
     func repositoryKeepsTheBodyWithItsTask() throws {
         let (repository, fileURL, cleanup) = try makeRepositoryWithTodayFile(
             "- [ ] 08:00 Report id:body0002\n  - add Q3\n- [ ] 09:00 Next id:next0001\n"

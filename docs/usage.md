@@ -16,7 +16,9 @@ Press Shift-Return to start a new line. The first line is the task; the lines be
   - CC the team
 ```
 
-Only the first line is read for `@project`, `#tag`, `!priority` and `due:`. When you edit a task, Option-Return adds a line. A blank line ends the description, so blank lines inside it are not kept.
+Only the first line is read for `@project`, `#tag`, `!priority` and `due:`. Click a description to open the task on its own, with the whole note at a readable size. Edit it there: Return starts a new line and ⌘Return saves. From a row's title editor, Shift-Return opens the note. A blank line ends the description, so blank lines inside it are not kept.
+
+Notes read as Markdown in the detail view: `- [ ] item` lines are checkboxes you can click, links and bare URLs open in the browser, and `**bold**`, `*italic*` and `` `code` `` are formatted. The file keeps the Markdown as you typed it.
 
 ## Today list
 
