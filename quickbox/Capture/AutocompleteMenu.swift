@@ -204,15 +204,10 @@ struct AutocompleteMenu: View {
         }
     }
 
+    /// One neutral icon color: the selected row is filled with the brand coral, and a second hue on
+    /// it would compete. The icon's shape already says which kind of suggestion it is.
     private func iconColor(for mode: AutocompleteType) -> Color {
-        switch mode {
-        case .tag: return .green.opacity(0.8)
-        case .project: return .purple.opacity(0.8)
-        case .priority: return .orange.opacity(0.8)
-        case .metadataKey: return .teal.opacity(0.9)
-        case .metadata: return .blue.opacity(0.8)
-        case .none: return .clear
-        }
+        Color.white.opacity(0.75)
     }
 
     private func iconForMetadataKey(_ key: String) -> String {

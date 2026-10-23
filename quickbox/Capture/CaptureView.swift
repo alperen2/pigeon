@@ -87,6 +87,14 @@ struct CaptureView: View {
         static let fillMuted = Color.white.opacity(0.06)
         /// Brand "Coral light", the link color on dark backgrounds (brand/README.md).
         static let link = Color(red: 0xFF / 255, green: 0x7C / 255, blue: 0x8B / 255)
+        /// The brand coral (the AccentColor asset: `#F36175` in this dark panel). Reserved for what
+        /// asks for attention or action: high priority, the selected suggestion, Save, focus.
+        static let brand = Color.accentColor
+        /// Medium priority and warnings: a warm second tone that stays apart from the coral
+        /// (8:1 on the panel). See "Functional colors" in brand/README.md.
+        static let amber = Color(red: 0xF2 / 255, green: 0xB4 / 255, blue: 0x50 / 255)
+        /// Tags, projects and metadata chips: neutral, so the coral stays meaningful.
+        static let chipText = Color.white.opacity(0.85)
         static let divider = Color.white.opacity(0.08)
         static let panelFill = Color(red: 38 / 255, green: 38 / 255, blue: 42 / 255).opacity(0.72)
     }
@@ -374,18 +382,18 @@ struct CaptureView: View {
                                     .font(.caption2.weight(.semibold))
                                 Text(insight.preview)
                                     .font(.caption2)
-                                    .foregroundStyle(insight.isResolved ? Style.secondaryLabel : Color.orange.opacity(0.85))
+                                    .foregroundStyle(insight.isResolved ? Style.secondaryLabel : Style.amber.opacity(0.9))
                             }
-                            .foregroundStyle(insight.isResolved ? Color.white.opacity(0.85) : Color.orange.opacity(0.95))
+                            .foregroundStyle(insight.isResolved ? Color.white.opacity(0.85) : Style.amber)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
                             .background(
                                 Capsule(style: .continuous)
-                                    .fill(insight.isResolved ? Style.fill : Color.orange.opacity(0.18))
+                                    .fill(insight.isResolved ? Style.fill : Style.amber.opacity(0.16))
                             )
                             .overlay(
                                 Capsule(style: .continuous)
-                                    .stroke(insight.isResolved ? Color.white.opacity(0.12) : Color.orange.opacity(0.28), lineWidth: 0.8)
+                                    .stroke(insight.isResolved ? Color.white.opacity(0.12) : Style.amber.opacity(0.3), lineWidth: 0.8)
                             )
                             .accessibilityIdentifier("capture-insight-\(index)")
                         }
@@ -906,16 +914,16 @@ struct CaptureView: View {
                 .font(.caption.weight(.semibold))
             Spacer(minLength: 0)
         }
-        .foregroundStyle(isError ? Color.orange.opacity(0.95) : Color.green.opacity(0.95))
+        .foregroundStyle(isError ? Style.amber : Style.label)
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .background(
             RoundedRectangle(cornerRadius: Layout.controlCornerRadius, style: .continuous)
-                .fill(isError ? Color.orange.opacity(0.16) : Color.green.opacity(0.16))
+                .fill(isError ? Style.amber.opacity(0.16) : Style.fill)
         )
         .overlay(
             RoundedRectangle(cornerRadius: Layout.controlCornerRadius, style: .continuous)
-                .stroke(isError ? Color.orange.opacity(0.30) : Color.green.opacity(0.30), lineWidth: 0.8)
+                .stroke(isError ? Style.amber.opacity(0.30) : Color.white.opacity(0.12), lineWidth: 0.8)
         )
     }
 
@@ -1364,13 +1372,13 @@ struct CaptureView: View {
 
         var colors: [Color] = []
         if indicator.priorities.contains(1) {
-            colors.append(isSelected ? Color.red.opacity(0.97) : Color.red.opacity(0.92))
+            colors.append(Style.brand)
         }
         if indicator.priorities.contains(2) {
-            colors.append(isSelected ? Color.orange.opacity(0.97) : Color.orange.opacity(0.92))
+            colors.append(Style.amber)
         }
         if indicator.priorities.contains(3) {
-            colors.append(isSelected ? Color.blue.opacity(0.97) : Color.blue.opacity(0.92))
+            colors.append(isSelected ? Color.black.opacity(0.8) : Color.white.opacity(0.8))
         }
         if indicator.hasUnprioritized {
             colors.append(isSelected ? Color.black.opacity(0.55) : Color.white.opacity(0.45))
@@ -1632,7 +1640,7 @@ struct CaptureView: View {
                                 if item.metadata["defer"] != nil || item.metadata["start"] != nil {
                                     Image(systemName: "tray.and.arrow.down.fill")
                                         .font(.system(size: 11))
-                                        .foregroundStyle(Color.blue.opacity(0.8))
+                                        .foregroundStyle(Style.secondaryLabel)
                                         .help("Deferred arrival")
                                         .accessibilityLabel("Deferred")
                                 }
@@ -1684,9 +1692,9 @@ struct CaptureView: View {
                                             .font(.system(size: 11, weight: .semibold))
                                             .padding(.horizontal, 6)
                                             .padding(.vertical, 2)
-                                            .background(Color.blue.opacity(0.2))
+                                            .background(Style.fill)
                                             .cornerRadius(5)
-                                            .foregroundStyle(.blue)
+                                            .foregroundStyle(Style.chipText)
                                     }
                                     
                                     ForEach(item.metadata.keys.sorted(), id: \.self) { key in
@@ -1754,7 +1762,7 @@ struct CaptureView: View {
                 sideActionButton(
                     tooltip: "Save",
                     systemImage: "checkmark",
-                    tint: Color.green.opacity(0.9)
+                    tint: Style.brand
                 ) {
                     saveEditing(item)
                 }
@@ -1900,6 +1908,7 @@ struct CaptureView: View {
                 Text(Self.inlineMarkdown(Self.displayBody(body)))
                     .font(.system(size: 12))
                     .foregroundStyle(Style.secondaryLabel)
+                    .tint(Style.link)
                     .lineSpacing(Layout.bodyLineSpacing)
                     .lineLimit(Int(Layout.maxBodyLines))
                     .multilineTextAlignment(.leading)
@@ -2014,7 +2023,7 @@ struct CaptureView: View {
                         startEditing(item)
                         openDetail(item, editingNotes: false)
                     }
-                    sideActionButton(tooltip: "Delete", systemImage: "trash", tint: Color.red.opacity(0.9)) {
+                    sideActionButton(tooltip: "Delete", systemImage: "trash", tint: Color.white.opacity(0.85)) {
                         detailItemID = nil
                         appState.handleSpotlightMutation(.delete(item.id))
                         notifyHeightChange()
@@ -2073,10 +2082,10 @@ struct CaptureView: View {
                             .keyboardShortcut(.return, modifiers: .command)
                             .buttonStyle(.plain)
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Style.label)
-                            .padding(.horizontal, 10)
+                            .foregroundStyle(Color.black.opacity(0.85))
+                            .padding(.horizontal, 12)
                             .padding(.vertical, 4)
-                            .background(Capsule(style: .continuous).fill(Style.fill))
+                            .background(Capsule(style: .continuous).fill(Style.brand))
                     }
                 } else if let body = item.body {
                     ScrollView {
@@ -2462,9 +2471,9 @@ struct CaptureView: View {
     private func priorityColor(for priority: Int?) -> Color {
         guard let priority = priority else { return Color.white.opacity(0.62) }
         switch priority {
-        case 1: return Color.red.opacity(0.85)
-        case 2: return Color.orange.opacity(0.85)
-        case 3: return Color.blue.opacity(0.85)
+        case 1: return Style.brand
+        case 2: return Style.amber
+        case 3: return Color.white.opacity(0.75)
         default: return Color.white.opacity(0.62)
         }
     }
@@ -2509,14 +2518,9 @@ struct CaptureView: View {
         }
     }
     
+    /// Metadata chips share one neutral color; their icons tell them apart.
     private func colorForMetadataKey(_ key: String) -> Color {
-        switch key.lowercased() {
-        case "dur", "time", "duration": return .gray
-        case "defer", "start": return .blue
-        case "remind", "alarm": return .orange
-        case TaskHandoffKey.assignee, TaskHandoffKey.author, TaskHandoffKey.origin, TaskHandoffKey.reference: return .teal
-        default: return .purple
-        }
+        Style.chipText
     }
     
     private func updateMetadata(item: InboxItem, key: String, newValue: String?) {

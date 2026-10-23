@@ -35,7 +35,19 @@ The logo and brand were designed by [Aydıncan Ataberk](https://aydincanataberk.
 
 The darker shades keep the same OKLCH hue (15°) as the logo coral, so they read as the same color instead of drifting to red. In dark mode, coral `#F36175` works as text and as a fill behind dark text (5.5:1 on `#1B1B1F`).
 
-Status colors stay semantic and separate from the brand. In the app, priority `!1` is red, `!2` orange and `!3` blue, and token highlights keep their own colors. Coral is not a priority color.
+### Functional colors
+
+In the app, coral means "this needs you or reacts to you": high priority, the selected suggestion, Save, focus, recognized tokens and links. Everything else stays neutral, so the coral keeps that meaning.
+
+| Role | Color | Notes |
+| --- | --- | --- |
+| Priority `!1` (High) | Coral `#F36175` | The circle and the "High" chip. |
+| Priority `!2` (Medium), warnings | Amber `#F2B450` | A warm second tone that does not read as coral (8:1 on the panel's `#26262A`). |
+| Priority `!3` (Low) | White at 75% | Neutral; the "Low" chip carries the meaning. |
+| Tags, projects, metadata chips | White at 85% on white at 10% | Neutral; icons tell metadata apart. |
+| Delete on hover | System red | Destructive actions keep the platform's red. |
+
+Priority is always spelled out as well (High, Medium, Low), so it never depends on color alone.
 
 ## Type
 
