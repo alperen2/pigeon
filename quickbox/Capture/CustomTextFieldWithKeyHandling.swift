@@ -394,16 +394,9 @@ class CustomNSTextField: NSTextField {
         }
     }
 
+    /// Recognized tokens take the brand coral (the AccentColor asset), like every other cue that
+    /// the app understood what was typed.
     private func baseColor(forMetadataKey key: String) -> NSColor {
-        switch key {
-        case "due", "defer", "start":
-            return NSColor.systemBlue
-        case "dur", "time", "duration":
-            return NSColor.systemTeal
-        case "remind", "alarm":
-            return NSColor.systemOrange
-        default:
-            return NSColor.systemPurple
-        }
+        NSColor(named: "AccentColor") ?? .controlAccentColor
     }
 }
