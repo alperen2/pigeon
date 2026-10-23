@@ -542,6 +542,11 @@ struct quickboxTests {
     }
 
     @Test
+    func bodyPreviewDrawsListMarkersAsBullets() {
+        #expect(CaptureView.displayBody("- one\n  * nested\nplain - text\n-no space") == "• one\n  • nested\nplain - text\n-no space")
+    }
+
+    @Test
     func repositoryKeepsTheBodyWithItsTask() throws {
         let (repository, fileURL, cleanup) = try makeRepositoryWithTodayFile(
             "- [ ] 08:00 Report id:body0002\n  - add Q3\n- [ ] 09:00 Next id:next0001\n"

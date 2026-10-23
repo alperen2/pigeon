@@ -13,10 +13,19 @@ enum CaptureMode {
     case minimal
 }
 
+/// Where the row being edited has its title field, so its suggestions can float above the list.
+private struct RowEditorAnchorKey: PreferenceKey {
+    static let defaultValue: Anchor<CGRect>? = nil
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = value ?? nextValue()
+    }
+}
+
 struct CaptureView: View {
     private enum FocusTarget: Hashable {
         case capture
         case rowEditor
+        case rowEditorNotes
     }
 
     private enum Layout {
@@ -52,9 +61,14 @@ struct CaptureView: View {
         static let maxTextLines: CGFloat = 3
         static let bodyFont = NSFont.systemFont(ofSize: 12, weight: .regular)
         static let bodyLineHeight = ceil(bodyFont.ascender - bodyFont.descender + bodyFont.leading)
-        static let maxBodyLines: CGFloat = 2
+        static let maxBodyLines: CGFloat = 3
+        static let maxExpandedBodyLines: CGFloat = 40
+        static let bodyLineSpacing: CGFloat = 2
         static let bodySpacing: CGFloat = 2
-        static let maxEditingLines: CGFloat = 6
+        /// "Show more" under a long body, with the spacing above it.
+        static let bodyToggleHeight: CGFloat = 16
+        static let editorSpacing: CGFloat = 4
+        static let editorHintHeight: CGFloat = 13
         /// The project, tag and metadata chips under the text, plus the stack spacing above them.
         static let chipRowHeight: CGFloat = 24
     }
@@ -77,13 +91,18 @@ struct CaptureView: View {
     @State private var animateIn = false
     @State private var hoveredItemID: String?
     @State private var editingItemID: String?
-    @State private var editingDraftText: String = ""
+    @State private var editingTitleText: String = ""
+    @State private var editingNotesText: String = ""
+    /// Rows whose long body is shown in full.
+    @State private var expandedBodyItemIDs: Set<String> = []
     
     // Autocomplete State
     @State private var autocompleteType: AutocompleteType = .none
     @State private var autocompleteSuggestions: [String] = []
     @State private var autocompleteSelectedIndex: Int = 0
     @State private var autocompleteReplacementTokenRange: Range<Int>? = nil
+    /// The field the open suggestions belong to: the capture input or a row's title editor.
+    @State private var autocompleteTarget: FocusTarget = .capture
     @State private var availableTags: [String] = []
     @State private var availableProjects: [String] = []
     @State private var isCalendarViewActive: Bool = false
@@ -141,6 +160,7 @@ struct CaptureView: View {
             notifyHeightChange()
         }
         .onChange(of: appState.draftText) {
+            autocompleteTarget = .capture
             handleTextChange(appState.draftText)
             analyzeDraftInsights()
             if appState.captureMessage != nil {
@@ -186,6 +206,30 @@ struct CaptureView: View {
                 animateIn = true
             }
             notifyHeightChange()
+        }
+        .onChange(of: editingTitleText) {
+            guard editingItemID != nil else { return }
+            autocompleteTarget = .rowEditor
+            handleTextChange(editingTitleText)
+            notifyHeightChange()
+        }
+        .onChange(of: editingNotesText) {
+            notifyHeightChange()
+        }
+        .onChange(of: expandedBodyItemIDs) {
+            notifyHeightChange()
+        }
+        .overlayPreferenceValue(RowEditorAnchorKey.self) { anchor in
+            GeometryReader { proxy in
+                if let anchor, editingItemID != nil, autocompleteTarget == .rowEditor, shouldShowAutocompleteMenu {
+                    let field = proxy[anchor]
+                    let menuHeight = AutocompleteMenu.estimatedHeight(suggestionCount: autocompleteSuggestions.count)
+                    // Open below the title; flip above it when the panel has no room underneath.
+                    let fitsBelow = field.maxY + 4 + menuHeight <= proxy.size.height
+                    rowEditorAutocompleteMenu
+                        .offset(x: field.minX, y: fitsBelow ? field.maxY + 4 : max(0, field.minY - menuHeight - 4))
+                }
+            }
         }
         .onExitCommand {
             if isCalendarViewActive {
@@ -279,7 +323,7 @@ struct CaptureView: View {
             .padding(.horizontal, Layout.captureHorizontalPadding)
             .padding(.bottom, Layout.captureRowBottomPadding)
             .overlay(alignment: .topLeading) {
-                if shouldShowAutocompleteMenu {
+                if shouldShowAutocompleteMenu && autocompleteTarget == .capture {
                     AutocompleteMenu(
                         mode: autocompleteType,
                         suggestions: autocompleteSuggestions,
@@ -421,7 +465,8 @@ struct CaptureView: View {
     
     // MARK: - Autocomplete Logic
     private func handleTextChange(_ newText: String) {
-        if newText.last?.isWhitespace == true {
+        // Suggestions complete tokens, which only exist on the first line; the rest is the body.
+        if newText.last?.isWhitespace == true || newText.contains("\n") {
             closeAutocomplete()
             return
         }
@@ -671,7 +716,7 @@ struct CaptureView: View {
         guard autocompleteSuggestions.indices.contains(autocompleteSelectedIndex) else { return }
         let accepted = autocompleteSuggestions[autocompleteSelectedIndex]
 
-        var tokens = appState.draftText.split(whereSeparator: \.isWhitespace).map(String.init)
+        var tokens = autocompleteText.split(whereSeparator: \.isWhitespace).map(String.init)
         guard let tokenRange = autocompleteReplacementTokenRange,
               tokenRange.lowerBound >= 0,
               tokenRange.upperBound <= tokens.count else {
@@ -703,8 +748,34 @@ struct CaptureView: View {
 
         tokens.replaceSubrange(tokenRange, with: [replacement])
         let updatedText = tokens.joined(separator: " ")
-        appState.draftText = shouldAppendTrailingSpace ? (updatedText + " ") : updatedText
+        autocompleteText = shouldAppendTrailingSpace ? (updatedText + " ") : updatedText
         closeAutocomplete()
+    }
+
+    /// The text of the field the suggestions belong to.
+    private var autocompleteText: String {
+        get { autocompleteTarget == .rowEditor ? editingTitleText : appState.draftText }
+        nonmutating set {
+            if autocompleteTarget == .rowEditor {
+                editingTitleText = newValue
+            } else {
+                appState.draftText = newValue
+            }
+        }
+    }
+
+    private var rowEditorAutocompleteMenu: some View {
+        AutocompleteMenu(
+            mode: autocompleteType,
+            suggestions: autocompleteSuggestions,
+            selectedIndex: autocompleteSelectedIndex,
+            onSelectIndex: { index in
+                autocompleteSelectedIndex = index
+            },
+            onAcceptSuggestion: { index in
+                acceptAutocomplete(at: index)
+            }
+        )
     }
 
     @ViewBuilder
@@ -1338,8 +1409,9 @@ struct CaptureView: View {
         return rowsHeight + separatorsHeight
     }
 
-    private func estimatedRowHeight(for item: InboxItem) -> CGFloat {
-        let availableTextWidth = max(
+    /// Width of a row's text column: the panel minus padding, the checkbox, the time and the action buttons.
+    private var rowTextWidth: CGFloat {
+        max(
             140,
             panelWidth
             - (16 * 2)
@@ -1350,35 +1422,33 @@ struct CaptureView: View {
             - Layout.trailingIconWidth
             - (Layout.rowSpacing * 2)
         )
+    }
 
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.lineBreakMode = .byWordWrapping
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: Layout.textFont,
-            .paragraphStyle: paragraphStyle
-        ]
-
-        func height(of text: String, font: NSFont, lineHeight: CGFloat, maxLines: CGFloat) -> CGFloat {
-            var fontAttributes = attributes
-            fontAttributes[.font] = font
-            let rect = (text as NSString).boundingRect(
-                with: CGSize(width: availableTextWidth, height: .greatestFiniteMagnitude),
+    private func estimatedRowHeight(for item: InboxItem) -> CGFloat {
+        func height(of text: String, style: CaptureFieldStyle) -> CGFloat {
+            // A trailing newline starts an empty line that the measurement would otherwise skip.
+            let measured = text.hasSuffix("\n") ? text + " " : text
+            let rect = (measured as NSString).boundingRect(
+                with: CGSize(width: rowTextWidth, height: .greatestFiniteMagnitude),
                 options: [.usesLineFragmentOrigin, .usesFontLeading],
-                attributes: fontAttributes
+                attributes: [.font: style.font]
             )
-            return min(max(lineHeight, ceil(rect.height)), lineHeight * maxLines)
+            return min(max(style.lineHeight, ceil(rect.height)), style.lineHeight * style.maxLines)
         }
 
         var clampedTextHeight: CGFloat
         if editingItemID == item.id {
-            // The editor shows the title and body together and grows as lines are added.
-            let draft = editingDraftText.hasSuffix("\n") ? editingDraftText + " " : editingDraftText
-            clampedTextHeight = height(of: draft, font: Layout.textFont, lineHeight: Layout.textLineHeight, maxLines: Layout.maxEditingLines)
+            clampedTextHeight = height(of: editingTitleText, style: .rowTitle)
+                + Layout.editorSpacing + height(of: editingNotesText, style: .rowNotes)
+                + Layout.editorSpacing + Layout.editorHintHeight
         } else {
-            clampedTextHeight = height(of: item.text, font: Layout.textFont, lineHeight: Layout.textLineHeight, maxLines: Layout.maxTextLines)
+            clampedTextHeight = height(of: item.text, style: CaptureFieldStyle(font: Layout.textFont, maxLines: Layout.maxTextLines))
             if let body = item.body {
-                clampedTextHeight += Layout.bodySpacing
-                    + height(of: body, font: Layout.bodyFont, lineHeight: Layout.bodyLineHeight, maxLines: Layout.maxBodyLines)
+                let maxLines = expandedBodyItemIDs.contains(item.id) ? Layout.maxExpandedBodyLines : Layout.maxBodyLines
+                clampedTextHeight += Layout.bodySpacing + bodyTextHeight(body, maxLines: maxLines)
+                if isBodyTruncatable(body) {
+                    clampedTextHeight += Layout.bodyToggleHeight
+                }
             }
             if !item.tags.isEmpty || item.projectName != nil || !item.metadata.isEmpty {
                 clampedTextHeight += Layout.chipRowHeight
@@ -1502,16 +1572,7 @@ struct CaptureView: View {
 
                 HStack(alignment: .top, spacing: 8) {
                     if isEditing {
-                        // Option-Return adds a line; the lines after the first are the task's body.
-                        TextField("Edit task", text: $editingDraftText, axis: .vertical)
-                            .lineLimit(1...Int(Layout.maxEditingLines))
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Style.label)
-                            .focused($focusedField, equals: .rowEditor)
-                            .onSubmit {
-                                saveEditing(item)
-                            }
+                        rowEditor(for: item)
                     } else {
                         VStack(alignment: .leading, spacing: 4) {
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -1531,11 +1592,7 @@ struct CaptureView: View {
                             }
 
                             if let body = item.body {
-                                Text(body)
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(Style.secondaryLabel)
-                                    .lineLimit(Int(Layout.maxBodyLines))
-                                    .fixedSize(horizontal: false, vertical: true)
+                                rowBody(body, for: item)
                                     .padding(.top, -2)
                             }
                                 
@@ -1697,20 +1754,154 @@ struct CaptureView: View {
         .help(tooltip)
     }
 
+    /// Title and notes edit separately: the title keeps the capture field's suggestions and
+    /// highlighting, the notes field below it holds the body.
+    private func rowEditor(for item: InboxItem) -> some View {
+        VStack(alignment: .leading, spacing: Layout.editorSpacing) {
+            CustomTextFieldWithKeyHandling(
+                text: $editingTitleText,
+                prompt: "Task",
+                accessibilityIdentifier: "row-editor-title",
+                style: .rowTitle,
+                onUpArrow: {
+                    guard !autocompleteSuggestions.isEmpty else { return false }
+                    autocompleteSelectedIndex = max(0, autocompleteSelectedIndex - 1)
+                    return true
+                },
+                onDownArrow: {
+                    guard !autocompleteSuggestions.isEmpty else { return false }
+                    autocompleteSelectedIndex = min(autocompleteSuggestions.count - 1, autocompleteSelectedIndex + 1)
+                    return true
+                },
+                onEnter: {
+                    guard !autocompleteSuggestions.isEmpty else { return false }
+                    acceptAutocomplete()
+                    return true
+                },
+                onTab: {
+                    if !autocompleteSuggestions.isEmpty {
+                        acceptAutocomplete()
+                    } else {
+                        focusedField = .rowEditorNotes
+                    }
+                    return true
+                },
+                onEscape: {
+                    if shouldShowAutocompleteMenu {
+                        closeAutocomplete()
+                    } else {
+                        cancelEditing()
+                    }
+                    return true
+                },
+                // The title stays one line: Shift-Return moves on to the notes.
+                onShiftEnter: {
+                    focusedField = .rowEditorNotes
+                    return true
+                },
+                onSubmit: {
+                    saveEditing(item)
+                }
+            )
+            .focused($focusedField, equals: .rowEditor)
+            .anchorPreference(key: RowEditorAnchorKey.self, value: .bounds) { $0 }
+
+            CustomTextFieldWithKeyHandling(
+                text: $editingNotesText,
+                prompt: "Add notes…",
+                accessibilityIdentifier: "row-editor-notes",
+                style: .rowNotes,
+                onEscape: {
+                    cancelEditing()
+                    return true
+                },
+                onSubmit: {
+                    saveEditing(item)
+                }
+            )
+            .focused($focusedField, equals: .rowEditorNotes)
+
+            Text("Return save • Shift-Return new line • Esc cancel")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Style.tertiaryLabel)
+        }
+    }
+
+    /// A body preview: a few lines with list markers drawn as bullets, expandable when it runs longer.
+    private func rowBody(_ body: String, for item: InboxItem) -> some View {
+        let isExpanded = expandedBodyItemIDs.contains(item.id)
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(Self.displayBody(body))
+                .font(.system(size: 12))
+                .foregroundStyle(Style.secondaryLabel)
+                .lineSpacing(Layout.bodyLineSpacing)
+                .lineLimit(isExpanded ? nil : Int(Layout.maxBodyLines))
+                .fixedSize(horizontal: false, vertical: true)
+
+            if isBodyTruncatable(body) {
+                Button(isExpanded ? "Show less" : "Show more") {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        if isExpanded {
+                            expandedBodyItemIDs.remove(item.id)
+                        } else {
+                            expandedBodyItemIDs.insert(item.id)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Style.tertiaryLabel)
+            }
+        }
+    }
+
+    /// Markdown list markers (`- `, `* `) read better as bullets; the stored text is unchanged.
+    static func displayBody(_ body: String) -> String {
+        body.components(separatedBy: "\n").map { line in
+            let indent = line.prefix(while: { $0 == " " || $0 == "\t" })
+            let rest = line.dropFirst(indent.count)
+            guard rest.hasPrefix("- ") || rest.hasPrefix("* ") else { return line }
+            return indent + "• " + rest.dropFirst(2)
+        }.joined(separator: "\n")
+    }
+
+    private func isBodyTruncatable(_ body: String) -> Bool {
+        bodyTextHeight(body, maxLines: .greatestFiniteMagnitude) > bodyTextHeight(body, maxLines: Layout.maxBodyLines)
+    }
+
+    private func bodyTextHeight(_ body: String, maxLines: CGFloat) -> CGFloat {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = Layout.bodyLineSpacing
+        let rect = (Self.displayBody(body) as NSString).boundingRect(
+            with: CGSize(width: rowTextWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: Layout.bodyFont, .paragraphStyle: paragraph]
+        )
+        let lineHeight = Layout.bodyLineHeight + Layout.bodyLineSpacing
+        return min(max(Layout.bodyLineHeight, ceil(rect.height)), lineHeight * maxLines)
+    }
+
     private func startEditing(_ item: InboxItem) {
+        closeAutocomplete()
         editingItemID = item.id
-        editingDraftText = TaskBody.joined(title: item.text, body: item.body)
+        editingTitleText = item.text
+        editingNotesText = item.body ?? ""
         focusRowEditorWithoutSelectingAll()
     }
 
     private func cancelEditing() {
+        closeAutocomplete()
         editingItemID = nil
-        editingDraftText = ""
+        editingTitleText = ""
+        editingNotesText = ""
         focusedField = .capture
     }
 
     private func saveEditing(_ item: InboxItem) {
-        let cleaned = editingDraftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleaned = TaskBody.joined(
+            title: editingTitleText.trimmingCharacters(in: .whitespacesAndNewlines),
+            body: TaskBody.normalized(editingNotesText)
+        )
         guard cleaned != TaskBody.joined(title: item.text, body: item.body) else {
             cancelEditing()
             return

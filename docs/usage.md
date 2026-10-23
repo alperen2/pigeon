@@ -16,7 +16,7 @@ Press Shift-Return to start a new line. The first line is the task; the lines be
   - CC the team
 ```
 
-Only the first line is read for `@project`, `#tag`, `!priority` and `due:`. When you edit a task, Option-Return adds a line. A blank line ends the description, so blank lines inside it are not kept.
+Only the first line is read for `@project`, `#tag`, `!priority` and `due:`. When you edit a task, its description has its own field under the title; Shift-Return moves there from the title. A blank line ends the description, so blank lines inside it are not kept.
 
 ## Today list
 
